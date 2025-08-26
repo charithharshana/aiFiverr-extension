@@ -1,0 +1,95 @@
+{
+  "manifest_version": 3,
+  "name": "aiFiverr - AI-Powered Fiverr Assistant (Firebase)",
+  "description": "Cross-browser AI-powered Fiverr assistant with Firebase authentication and cloud storage",
+  "version": "2.0.0",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "tabs",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "https://www.fiverr.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://www.googleapis.com/*",
+    "https://accounts.google.com/*",
+    "https://firestore.googleapis.com/*",
+    "https://firebase.googleapis.com/*",
+    "https://ai-fiverr.web.app/*",
+    "https://ai-fiverr.firebaseapp.com/*",
+    "https://www.gstatic.com/*",
+    "https://securetoken.googleapis.com/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "firebase/background/firebase-background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.fiverr.com/*", "file://*/*", "http://*/*", "https://*/*"],
+      "js": [
+        "firebase/firebase-config.js",
+        "firebase/database/firebase-database-service.js",
+        "firebase/migration/data-migration.js",
+        "content/utils/helpers.js",
+        "content/utils/storage.js",
+        "content/utils/export-import.js",
+        "content/utils/prompt-selector.js",
+        "content/utils/markdown-renderer.js",
+        "content/utils/advanced-editor.js",
+        "content/utils/chatAssistantManager.js",
+        "content/auth/firebase-google-auth.js",
+        "content/auth/firebase-google-client.js",
+        "content/auth/google-drive-client.js",
+        "content/fiverr/detector.js",
+        "content/fiverr/extractor.js",
+        "content/fiverr/injector.js",
+        "content/fiverr/text-selector.js",
+        "content/ai/session.js",
+        "content/ai/api-manager.js",
+        "content/ai/gemini-client.js",
+        "content/ai/enhanced-gemini-client.js",
+        "content/ai/gemini-files-client.js",
+        "content/ai/prompt-manager.js",
+        "content/ai/knowledge-base.js",
+        "content/ai/universal-chat-simple.js",
+        "content/main.js"
+      ],
+      "css": ["content/styles/main.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/styles/*",
+        "content/utils/*",
+        "content/ai/*",
+        "firebase/*",
+        "docs/*",
+        "icons/*",
+        "popup/*"
+      ],
+      "matches": ["https://www.fiverr.com/*", "file://*/*", "http://*/*", "https://*/*"]
+    }
+  ]
+}

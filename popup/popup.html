@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>aiFiverr Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="popup-header">
+      <div class="logo">
+        <img src="../icons/icon48.png" alt="aiFiverr" class="logo-icon">
+        <h1>aiFiverr</h1>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="tab-navigation">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="conversations">Conversations</button>
+      <button class="tab-btn" data-tab="api">API Config</button>
+      <button class="tab-btn" data-tab="settings">Settings</button>
+    </nav>
+
+    <!-- Tab Content -->
+    <main class="tab-content">
+      <!-- Dashboard Tab -->
+      <div class="tab-panel active" id="dashboard">
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon">💬</div>
+            <div class="stat-info">
+              <div class="stat-number" id="totalConversations">0</div>
+              <div class="stat-label">Conversations</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🔑</div>
+            <div class="stat-info">
+              <div class="stat-number" id="healthyKeys">0</div>
+              <div class="stat-label">Healthy API Keys</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">📝</div>
+            <div class="stat-info">
+              <div class="stat-number" id="totalPrompts">0</div>
+              <div class="stat-label">Custom Prompts</div>
+            </div>
+          </div>
+        </div>
+
+
+
+        <div class="recent-activity">
+          <h3>Recent Activity</h3>
+          <div class="activity-list" id="activityList">
+            <div class="activity-item">
+              <div class="activity-icon">💬</div>
+              <div class="activity-content">
+                <div class="activity-title">Welcome to aiFiverr!</div>
+                <div class="activity-time">Just now</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Conversations Tab -->
+      <div class="tab-panel" id="conversations">
+        <div class="conversations-header">
+          <div class="conversations-title">
+            <h3>Extracted Conversations</h3>
+            <p class="conversations-description">View and manage Fiverr conversations extracted by the extension</p>
+          </div>
+          <div class="conversations-actions">
+            <button class="btn-secondary" id="refreshConversations">🔄 Refresh</button>
+            <button class="btn-secondary" id="clearAllConversations">🗑️ Clear All</button>
+          </div>
+        </div>
+
+        <div class="conversations-stats">
+          <div class="stat-item">
+            <span class="stat-label">Total Conversations:</span>
+            <span class="stat-value" id="totalConversationsCount">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Storage Used:</span>
+            <span class="stat-value" id="storageUsed">0 KB</span>
+          </div>
+        </div>
+
+        <div class="conversations-list-container">
+          <div class="conversations-list" id="conversationsList">
+            <!-- Conversations will be populated here -->
+          </div>
+        </div>
+
+        <!-- Conversation Detail Modal -->
+        <div class="conversation-modal-overlay" id="conversationModalOverlay">
+          <div class="conversation-modal">
+            <div class="conversation-modal-header">
+              <div class="conversation-modal-title">
+                <h4 id="conversationModalTitle">Conversation Details</h4>
+                <div class="conversation-modal-meta" id="conversationModalMeta"></div>
+              </div>
+              <div class="conversation-modal-actions">
+                <div class="export-section">
+                  <label for="exportFormat">Export as:</label>
+                  <select id="exportFormat">
+                    <option value="markdown">Markdown (.md)</option>
+                    <option value="json">JSON (.json)</option>
+                    <option value="txt">Text (.txt)</option>
+                    <option value="csv">CSV (.csv)</option>
+                    <option value="html">HTML (.html)</option>
+                  </select>
+                  <button class="btn-primary" id="exportConversation">📥 Export</button>
+                </div>
+                <button class="conversation-modal-close" id="closeConversationModal">×</button>
+              </div>
+            </div>
+            <div class="conversation-modal-body">
+              <div class="conversation-content" id="conversationContent">
+                <!-- Conversation content will be displayed here -->
+              </div>
+            </div>
+            <div class="conversation-modal-footer">
+              <button class="btn-secondary" id="deleteConversation">🗑️ Delete</button>
+              <button class="btn-secondary" id="refreshSingleConversation">🔄 Refresh</button>
+              <button class="btn-secondary" id="closeConversationModalBtn">Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- API Configuration Tab -->
+      <div class="tab-panel" id="api">
+        <div class="settings-section">
+          <h3>Gemini AI Model</h3>
+          <div class="api-model-container">
+            <div class="model-selection">
+              <label for="defaultModel">Select AI Model:</label>
+              <select id="defaultModel">
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+              </select>
+              <p class="model-description">Choose the Gemini model for AI responses. Flash models are faster, Pro models are more capable.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>API Keys</h3>
+          <div class="api-keys-container">
+            <div class="api-keys-input-section">
+              <div class="api-keys-input-wrapper">
+                <textarea
+                  id="apiKeysInput"
+                  placeholder="Enter your Gemini API keys (one per line)&#10;AIzaSyC...&#10;AIzaSyD..."
+                  rows="4"
+                ></textarea>
+                <button class="api-keys-visibility-toggle" id="toggleApiKeysVisibility" title="Toggle API keys visibility">
+                  <span class="eye-icon" id="eyeIcon">👁️</span>
+                </button>
+              </div>
+              <div class="api-keys-actions">
+                <button class="btn-secondary" id="testApiKeys">Test Keys</button>
+                <button class="btn-secondary" id="clearApiKeys">Clear All</button>
+              </div>
+            </div>
+            <div class="api-keys-status" id="apiKeysStatus"></div>
+            <div class="api-keys-summary" id="apiKeysSummary"></div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>API Configuration</h3>
+          <div class="api-config-container">
+            <div class="config-item">
+              <label for="apiTimeout">Request Timeout (seconds)</label>
+              <input type="number" id="apiTimeout" value="30" min="10" max="120">
+            </div>
+            <div class="config-item">
+              <label for="maxRetries">Max Retries</label>
+              <input type="number" id="maxRetries" value="3" min="1" max="10">
+            </div>
+            <div class="config-item">
+              <label for="keyRotation">Enable API Key Rotation</label>
+              <input type="checkbox" id="keyRotation" checked>
+            </div>
+          </div>
+          <div class="api-save-section">
+            <button class="btn-primary api-save-btn" id="apiSaveBtn">💾 Save API Configuration</button>
+            <p class="save-description">Save API model, keys, and configuration settings</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Tab -->
+      <div class="tab-panel" id="settings">
+        <!-- Authentication Section -->
+        <div class="settings-section">
+          <h3>Google Authentication</h3>
+          <div class="auth-container">
+            <div class="auth-status" id="authStatus">
+              <div class="auth-status-loading">
+                <span class="loading-spinner"></span>
+                <span>Checking authentication status...</span>
+              </div>
+            </div>
+
+            <!-- Not Authenticated State -->
+            <div class="auth-not-authenticated" id="authNotAuthenticated" style="display: none;">
+              <div class="auth-info">
+                <p>Sign in with your Google account to:</p>
+                <ul>
+                  <li>Upload knowledge base files to Google Drive</li>
+                  <li>Sync settings across devices</li>
+                </ul>
+              </div>
+              <button class="btn-primary auth-btn" id="signInBtn">
+                <span class="google-icon">G</span>
+                Sign in with Google
+              </button>
+            </div>
+
+            <!-- Authenticated State -->
+            <div class="auth-authenticated" id="authAuthenticated" style="display: none;">
+              <div class="auth-user-info">
+                <img class="auth-user-avatar" id="userAvatar" src="" alt="User Avatar">
+                <div class="auth-user-details">
+                  <div class="auth-user-name" id="userName"></div>
+                  <div class="auth-user-email" id="userEmail"></div>
+                </div>
+              </div>
+              <div class="auth-actions">
+                <button class="btn-secondary" id="testConnectionBtn">Test Connection</button>
+                <button class="btn-danger" id="signOutBtn">Sign Out</button>
+              </div>
+              <div class="auth-stats" id="authStats">
+                <!-- Stats will be populated here -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Knowledge Base</h3>
+          <div class="knowledge-base-container">
+            <!-- Knowledge Base Tabs -->
+            <div class="kb-tabs">
+              <button class="kb-tab-btn active" data-tab="variables">Variables</button>
+              <button class="kb-tab-btn" data-tab="files">Files</button>
+            </div>
+
+            <!-- Variables Tab -->
+            <div class="kb-tab-content active" id="variablesTab">
+              <div class="kb-header">
+                <p class="kb-description">Create variables for AI responses. Use <code>{{variable_name}}</code> in prompts.</p>
+                <div class="kb-header-actions">
+                  <button class="btn-secondary kb-populate-btn" id="populateFromPrompts">Auto-populate from Prompts</button>
+                  <button class="btn-primary kb-add-btn" id="addKnowledgeItem">+ Add Variable</button>
+                </div>
+              </div>
+
+            <!-- Add/Edit Form -->
+            <div class="kb-form-overlay" id="knowledgeFormOverlay">
+              <div class="kb-form-modal">
+                <div class="kb-form-header">
+                  <h4 id="kbFormTitle">Add Variable</h4>
+                  <button class="kb-form-close" id="closeKnowledgeForm">×</button>
+                </div>
+                <div class="kb-form-body">
+                  <div class="kb-form-group">
+                    <label for="newKbKey">Name</label>
+                    <input type="text" id="newKbKey" placeholder="bio, services, experience" class="kb-input">
+                  </div>
+                  <div class="kb-form-group">
+                    <label for="newKbValue">Value</label>
+                    <textarea id="newKbValue" placeholder="Enter content..." class="kb-textarea" rows="3"></textarea>
+                  </div>
+                </div>
+                <div class="kb-form-footer">
+                  <button class="btn-secondary" id="cancelKnowledgeItem">Cancel</button>
+                  <button class="btn-primary" id="saveKnowledgeItem">Save</button>
+                </div>
+              </div>
+            </div>
+
+              <!-- Variables List -->
+              <div class="kb-variables-list" id="knowledgeBaseList">
+                <!-- Variables will be populated here -->
+              </div>
+            </div>
+
+            <!-- Files Tab -->
+            <div class="kb-tab-content" id="filesTab">
+              <div class="kb-files-header">
+                <p class="kb-files-description">Upload and manage files for your knowledge base. Files are stored in Google Drive and can be attached to prompts.</p>
+                <div class="kb-files-actions">
+                  <button class="btn-secondary" id="refreshKbFiles">🔄 Refresh</button>
+                  <button class="btn-primary" id="uploadKbFiles">📁 Upload Files</button>
+                </div>
+              </div>
+
+              <!-- File Upload Area -->
+              <div class="kb-file-upload-area" id="kbFileUploadArea" style="display: none;">
+                <div class="upload-dropzone" id="uploadDropzone">
+                  <div class="upload-icon">📁</div>
+                  <div class="upload-text">
+                    <p><strong>Drop files here or click to browse</strong></p>
+                    <p>Supports: Documents, Images, Audio, Video, Code files</p>
+                    <p>Max size: 100MB per file</p>
+                  </div>
+                  <input type="file" id="fileInput" multiple accept=".txt,.doc,.docx,.pdf,.rtf,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.gif,.mp3,.mp4,.mov,.py,.js,.html,.css,.json" style="display: none;">
+                </div>
+                <div class="upload-progress" id="uploadProgress" style="display: none;">
+                  <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                  </div>
+                  <div class="progress-text" id="progressText">Uploading...</div>
+                </div>
+              </div>
+
+              <!-- File Statistics -->
+              <div class="kb-files-stats" id="kbFilesStats">
+                <div class="stat-item">
+                  <span class="stat-label">Total Files:</span>
+                  <span class="stat-value" id="totalKbFiles">0</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Storage Used:</span>
+                  <span class="stat-value" id="kbStorageUsed">0 MB</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Google Drive:</span>
+                  <span class="stat-value" id="driveStatus">Not Connected</span>
+                </div>
+              </div>
+
+              <!-- File Search and Filters -->
+              <div class="kb-files-search">
+                <div class="search-input-wrapper">
+                  <input type="text" id="kbFileSearch" placeholder="Search files..." class="search-input">
+                  <button class="search-btn" id="searchKbFiles">🔍</button>
+                </div>
+                <div class="file-filters">
+                  <select id="fileTypeFilter">
+                    <option value="">All Types</option>
+                    <option value="text">Documents</option>
+                    <option value="image">Images</option>
+                    <option value="audio">Audio</option>
+                    <option value="video">Video</option>
+                    <option value="application">Code/Data</option>
+                  </select>
+                  <select id="fileSortOrder">
+                    <option value="modified">Recently Modified</option>
+                    <option value="created">Recently Created</option>
+                    <option value="name">Name A-Z</option>
+                    <option value="size">File Size</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Files List -->
+              <div class="kb-files-list" id="kbFilesList">
+                <!-- Files will be populated here -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Prompt Management</h3>
+          <div class="prompt-management-container">
+            <div class="prompt-management-header">
+              <p class="prompt-management-description">
+                Create and manage custom prompts for different scenarios. Favorite your most-used prompts for quick access.
+              </p>
+              <div class="prompt-management-tabs">
+                <button class="prompt-tab-btn active" data-tab="custom">Custom Prompts</button>
+                <button class="prompt-tab-btn" data-tab="default">Default Prompts</button>
+                <button class="prompt-tab-btn" data-tab="favorites">Favorites</button>
+              </div>
+            </div>
+
+            <div class="prompt-add-button-container">
+              <button class="btn-primary" id="addPromptBtn">+ Add Custom Prompt</button>
+            </div>
+
+            <div class="prompt-add-form" id="promptAddForm">
+              <div class="prompt-form-field">
+                <label for="newPromptKey" class="field-label">
+                  Prompt Key <span class="field-help" title="Unique identifier for this prompt. Use lowercase letters, numbers, and underscores only.">ℹ️</span>
+                </label>
+                <input type="text" id="newPromptKey" placeholder="e.g., professional_reply" class="prompt-key-input">
+                <small class="field-description">Unique identifier (letters, numbers, underscores only)</small>
+              </div>
+
+              <div class="prompt-form-field">
+                <label for="newPromptName" class="field-label">
+                  Display Name <span class="field-help" title="Human-readable name shown in the interface">ℹ️</span>
+                </label>
+                <input type="text" id="newPromptName" placeholder="e.g., Professional Reply" class="prompt-name-input">
+                <small class="field-description">Friendly name displayed in the prompt list</small>
+              </div>
+
+              <div class="prompt-form-field">
+                <label for="newPromptDescription" class="field-label">
+                  Description <span class="field-help" title="Brief explanation of what this prompt does and when to use it">ℹ️</span>
+                </label>
+                <textarea id="newPromptDescription" placeholder="Brief description of what this prompt does..." class="prompt-description-input" rows="2"></textarea>
+                <small class="field-description">Explain what this prompt does and when to use it</small>
+              </div>
+
+              <div class="prompt-form-field">
+                <label for="newPromptContent" class="field-label">
+                  Prompt Content <span class="field-help" title="The actual prompt text. Use {{variable_name}} to reference knowledge base variables and {conversation} for Fiverr conversation data">ℹ️</span>
+                </label>
+                <textarea id="newPromptContent" placeholder="Enter your prompt content here. Use {{variable_name}} to reference knowledge base variables..." class="prompt-content-input" rows="6"></textarea>
+                <small class="field-description">
+                  Use {{variable_name}} for knowledge base variables<br>
+                  Fiverr variables: {conversation}, {conversation_summary}, {conversation_count}, {conversation_last_message}, {username}
+                </small>
+              </div>
+
+              <div class="prompt-form-field">
+                <label class="field-label">
+                  Knowledge Base Files <span class="field-help" title="Select files from your knowledge base to attach to this prompt">ℹ️</span>
+                </label>
+                <div class="kb-file-selector-container">
+                  <button type="button" class="btn-secondary kb-file-selector-btn" id="selectKbFiles">
+                    📁 Select Files from Knowledge Base
+                  </button>
+                  <div class="selected-kb-files" id="selectedKbFiles">
+                    <!-- Selected files will be displayed here -->
+                  </div>
+                </div>
+                <small class="field-description">
+                  Selected files will be sent to Gemini API along with the prompt for enhanced context
+                </small>
+              </div>
+
+              <div class="prompt-form-actions">
+                <button class="btn-primary" id="savePromptBtn">Save Prompt</button>
+                <button class="btn-secondary" id="cancelPromptBtn">Cancel</button>
+              </div>
+            </div>
+
+            <div class="prompt-tab-content">
+              <div class="prompt-panel active" id="customPromptsPanel">
+                <div class="prompt-list" id="customPromptsList"></div>
+              </div>
+              <div class="prompt-panel" id="defaultPromptsPanel">
+                <div class="prompt-list" id="defaultPromptsList"></div>
+              </div>
+              <div class="prompt-panel" id="favoritesPanel">
+                <div class="prompt-list" id="favoritePromptsList"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Preferences</h3>
+          <div class="preferences-container">
+            <div class="preference-item">
+              <label for="restrictToFiverr">Fiverr only</label>
+              <input type="checkbox" id="restrictToFiverr" checked>
+              <small class="field-description">Enable on all websites when unchecked</small>
+            </div>
+            <div class="preference-item">
+              <label for="autoSave">Auto-save sessions</label>
+              <input type="checkbox" id="autoSave" checked>
+            </div>
+            <div class="preference-item">
+              <label for="notifications">Show notifications</label>
+              <input type="checkbox" id="notifications" checked>
+            </div>
+            <div class="preference-item">
+              <label for="maxContextLength">Max context length</label>
+              <input type="number" id="maxContextLength" value="10000" min="1000" max="50000">
+            </div>
+
+          </div>
+          <div class="global-save-section">
+            <button class="btn-primary global-save-btn" id="globalSaveBtn">💾 Save All Settings</button>
+            <p class="save-description">Save all API keys, preferences, and configurations</p>
+          </div>
+        </div>
+      </div>
+
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="popup-footer">
+      <div class="footer-links">
+        <a href="#" id="helpLink">Help</a>
+        <a href="#" id="feedbackLink">Feedback</a>
+        <a href="#" id="aboutLink">How to</a>
+        <a href="#" id="downloadLink">Download</a>
+      </div>
+      <div class="version-info">v1.0.0</div>
+    </footer>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+    <div class="loading-spinner">
+      <div class="spinner"></div>
+      <div class="loading-text">Processing...</div>
+    </div>
+  </div>
+
+  <!-- Knowledge Base File Detail Modal -->
+  <div class="kb-file-modal-overlay" id="kbFileModalOverlay" style="display: none;">
+    <div class="kb-file-modal">
+      <div class="kb-file-modal-header">
+        <div class="kb-file-modal-title">
+          <h4 id="kbFileModalTitle">File Details</h4>
+          <div class="kb-file-modal-meta" id="kbFileModalMeta"></div>
+        </div>
+        <div class="kb-file-modal-actions">
+          <button class="file-action-btn" id="downloadKbFile" title="Download">📥</button>
+          <button class="file-action-btn" id="copyKbFileLink" title="Copy Link">🔗</button>
+          <button class="file-action-btn file-action-delete" id="deleteKbFile" title="Delete">🗑️</button>
+          <button class="kb-file-modal-close" id="closeKbFileModal">×</button>
+        </div>
+      </div>
+      <div class="kb-file-modal-body">
+        <div class="kb-file-info">
+          <div class="file-info-section">
+            <h5>File Information</h5>
+            <div class="file-info-grid">
+              <div class="info-item">
+                <span class="info-label">Name:</span>
+                <span class="info-value" id="fileInfoName">-</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Type:</span>
+                <span class="info-value" id="fileInfoType">-</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Size:</span>
+                <span class="info-value" id="fileInfoSize">-</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Created:</span>
+                <span class="info-value" id="fileInfoCreated">-</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Modified:</span>
+                <span class="info-value" id="fileInfoModified">-</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Gemini Status:</span>
+                <span class="info-value" id="fileInfoGeminiStatus">-</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="file-info-section">
+            <h5>Description & Tags</h5>
+            <div class="file-description-edit">
+              <textarea id="fileDescriptionEdit" placeholder="Add description..." rows="3"></textarea>
+              <div class="file-tags-edit">
+                <input type="text" id="fileTagsEdit" placeholder="Add tags (comma-separated)">
+              </div>
+              <button class="btn-primary btn-sm" id="saveFileMetadata">Save Changes</button>
+            </div>
+          </div>
+
+          <div class="file-info-section" id="filePreviewSection">
+            <h5>Preview</h5>
+            <div class="file-preview" id="filePreview">
+              <!-- File preview will be shown here -->
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="kb-file-modal-footer">
+        <div class="file-actions">
+          <button class="btn-primary" id="attachToPrompt">📎 Attach to Prompt</button>
+          <button class="btn-secondary" id="uploadToGemini">🚀 Upload to Gemini</button>
+        </div>
+        <button class="btn-secondary" id="closeKbFileModalBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- File Selection Modal for Prompts -->
+  <div class="file-selection-modal-overlay" id="fileSelectionModalOverlay" style="display: none;">
+    <div class="file-selection-modal">
+      <div class="file-selection-header">
+        <h4>Select Files for Prompt</h4>
+        <button class="file-selection-close" id="closeFileSelectionModal">×</button>
+      </div>
+      <div class="file-selection-body">
+        <div class="file-selection-search">
+          <input type="text" id="fileSelectionSearch" placeholder="Search files..." class="search-input">
+        </div>
+        <div class="file-selection-list" id="fileSelectionList">
+          <!-- Selectable files will be shown here -->
+        </div>
+      </div>
+      <div class="file-selection-footer">
+        <div class="selected-files-info">
+          <span id="selectedFilesCount">0 files selected</span>
+        </div>
+        <div class="file-selection-actions">
+          <button class="btn-secondary" id="clearFileSelection">Clear All</button>
+          <button class="btn-primary" id="confirmFileSelection">Attach Selected</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notifications -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
