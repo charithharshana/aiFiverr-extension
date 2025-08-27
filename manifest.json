@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "aiFiverr - AI-Powered Fiverr Assistant (Firebase)",
   "description": "Cross-browser AI-powered Fiverr assistant with Firebase authentication and cloud storage",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "permissions": [
     "activeTab",
     "storage",
@@ -45,7 +45,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.fiverr.com/*", "file://*/*", "http://*/*", "https://*/*"],
+      "matches": [
+        "https://www.fiverr.com/*",
+        "file://*/*",
+        "http://*/*",
+        "https://*/*"
+      ],
       "js": [
         "firebase/firebase-config.js",
         "firebase/database/firebase-database-service.js",
@@ -74,7 +79,9 @@
         "content/ai/universal-chat-simple.js",
         "content/main.js"
       ],
-      "css": ["content/styles/main.css"],
+      "css": [
+        "content/styles/main.css"
+      ],
       "run_at": "document_end"
     }
   ],
@@ -89,7 +96,12 @@
         "icons/*",
         "popup/*"
       ],
-      "matches": ["https://www.fiverr.com/*", "file://*/*", "http://*/*", "https://*/*"]
+      "matches": [
+        "https://www.fiverr.com/*",
+        "file://*/*",
+        "http://*/*",
+        "https://*/*"
+      ]
     }
   ]
 }

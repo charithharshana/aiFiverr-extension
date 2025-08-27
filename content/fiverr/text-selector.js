@@ -46,8 +46,8 @@ class TextSelector {
       const result = await chrome.storage.local.get(['settings']);
       const settings = result.settings || {};
 
-      // Default to restricting to Fiverr only (restrictToFiverr: true)
-      const restrictToFiverr = settings.restrictToFiverr !== false;
+      // Default to allowing all sites (restrictToFiverr: false)
+      const restrictToFiverr = settings.restrictToFiverr === true;
 
       if (restrictToFiverr) {
         // Only initialize on Fiverr pages
@@ -74,11 +74,12 @@ class TextSelector {
     // Hide floating icon when clicking elsewhere
     document.addEventListener('mousedown', (e) => this.handleMouseDown(e));
 
-    // Handle window resize - only hide if not interacting with dropdown
+    // Handle window resize - only hide dropdown, never hide the icon
     window.addEventListener('resize', () => {
-      if (!this.contextMenu || this.contextMenu.style.display !== 'block') {
-        this.hideFloatingIcon();
+      if (this.contextMenu && this.contextMenu.style.display === 'block') {
+        this.contextMenu.style.display = 'none';
       }
+      // Note: Icon position will be updated when user makes a new selection
     });
 
     // Handle scroll - only hide dropdown if scrolling outside the dropdown area
@@ -126,7 +127,7 @@ class TextSelector {
   }
 
   /**
-   * Handle mouse down events - only hide dropdown, not the icon
+   * Handle mouse down events - only hide dropdown, never hide the icon automatically
    */
   handleMouseDown(e) {
     // Don't hide anything if clicking on our UI elements
@@ -141,6 +142,9 @@ class TextSelector {
     if (this.contextMenu && this.contextMenu.style.display === 'block') {
       this.contextMenu.style.display = 'none';
     }
+
+    // IMPORTANT: Never hide the floating icon automatically
+    // The icon should only be hidden when the close button is clicked
   }
 
   /**
@@ -154,11 +158,16 @@ class TextSelector {
 
     const selection = window.getSelection();
 
-    if (!selection || selection.rangeCount === 0) {
-      // Only hide if not interacting with UI
-      if (!this.isInteractingWithUI) {
-        this.hideFloatingIcon();
+    // If there's already a floating icon visible, don't hide it unless explicitly closed
+    if (this.floatingIcon && this.floatingIcon.style.display === 'flex') {
+      // Only process new selections, don't hide existing icon
+      if (!selection || selection.rangeCount === 0 || selection.toString().trim().length < 3) {
+        return; // Keep existing icon visible
       }
+    }
+
+    if (!selection || selection.rangeCount === 0) {
+      // Don't hide existing icon, just return
       return;
     }
 
@@ -167,11 +176,8 @@ class TextSelector {
 
     // Minimum text length requirement
     if (selectedText.length < 3) {
-      console.log('aiFiverr: Text too short, hiding icon');
-      // Only hide if not interacting with UI
-      if (!this.isInteractingWithUI) {
-        this.hideFloatingIcon();
-      }
+      console.log('aiFiverr: Text too short, keeping existing icon if present');
+      // Don't hide existing icon, just return
       return;
     }
 
@@ -180,10 +186,7 @@ class TextSelector {
     console.log('aiFiverr: Selection area valid:', isValid);
 
     if (!isValid) {
-      // Only hide if not interacting with UI
-      if (!this.isInteractingWithUI) {
-        this.hideFloatingIcon();
-      }
+      // Don't hide existing icon, just return
       return;
     }
 
@@ -365,7 +368,7 @@ class TextSelector {
     try {
       const result = await chrome.storage.local.get(['settings']);
       const settings = result.settings || {};
-      const restrictToFiverr = settings.restrictToFiverr !== false;
+      const restrictToFiverr = settings.restrictToFiverr === true;
 
       console.log('aiFiverr: Site restriction check for text selection:', {
         restrictToFiverr,
@@ -740,9 +743,11 @@ class TextSelector {
   }
 
   /**
-   * Hide floating icon
+   * Hide floating icon - should only be called when user explicitly closes it
    */
   hideFloatingIcon() {
+    console.log('aiFiverr: Hiding floating icon (explicit close)');
+
     if (this.floatingIcon) {
       this.floatingIcon.style.display = 'none';
     }
@@ -751,12 +756,15 @@ class TextSelector {
       this.contextMenu.style.display = 'none';
     }
 
-    // Clear selection
+    // Clear selection data
     this.selectedText = '';
     this.currentSelection = null;
     this.selectionRect = null;
     this.preservedSelection = null;
     this.preservedRange = null;
+
+    // Reset interaction flag
+    this.isInteractingWithUI = false;
   }
 
   /**

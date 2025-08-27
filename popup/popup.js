@@ -638,7 +638,7 @@ class PopupManager {
           defaultModelEl.value = settings.selectedModel || settings.defaultModel;
         }
 
-        document.getElementById('restrictToFiverr').checked = settings.restrictToFiverr !== false;
+        document.getElementById('restrictToFiverr').checked = settings.restrictToFiverr === true;
         document.getElementById('autoSave').checked = settings.autoSave !== false;
         document.getElementById('notifications').checked = settings.notifications !== false;
         document.getElementById('maxContextLength').value = settings.maxContextLength || 10000;
