@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "aiFiverr - AI-Powered Fiverr Assistant (Firebase)",
   "description": "Cross-browser AI-powered Fiverr assistant with Firebase authentication and cloud storage",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "permissions": [
     "activeTab",
     "storage",
@@ -55,6 +55,7 @@
         "firebase/firebase-config.js",
         "firebase/database/firebase-database-service.js",
         "firebase/migration/data-migration.js",
+        "content/libs/showdown.min.js",
         "content/utils/helpers.js",
         "content/utils/storage.js",
         "content/utils/export-import.js",
@@ -73,10 +74,12 @@
         "content/ai/api-manager.js",
         "content/ai/gemini-client.js",
         "content/ai/enhanced-gemini-client.js",
+        "content/ai/streaming-chatbox.js",
         "content/ai/gemini-files-client.js",
         "content/ai/prompt-manager.js",
         "content/ai/knowledge-base.js",
-        "content/ai/universal-chat-simple.js",
+        "content/ai/variable-processor.js",
+
         "content/main.js"
       ],
       "css": [

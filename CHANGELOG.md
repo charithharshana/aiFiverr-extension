@@ -1,22 +1,32 @@
 # Changelog
 
-## [2.0.1] - 2025-08-27
+## [2.0.2] - 2025-08-30
 
 ### Added
-- Firebase authentication integration
-- Cross-browser compatibility
-- Enhanced API key rotation
-- Improved file management
+- 💬 New message icon design with blue gradient background
+- 🔗 Updated footer links with proper contact information
+- 📁 Knowledge base integration with Google Drive
+- ⌨️ Customizable keyboard shortcuts
+- 🎯 Enhanced text selection AI assistance
+- 📱 Streaming chat interface with context preservation
+- 🔄 Advanced API key rotation system
+- 💾 Export/import functionality for conversations
+- 🔐 Firebase authentication integration
+- 🌐 Cross-browser compatibility
 
 ### Changed
-- Migrated from Chrome identity API to Firebase
-- Updated authentication flow
-- Enhanced security measures
+- 🎨 Replaced brain icon with modern message bubble design
+- 🔗 Updated all footer links to correct URLs
+- 🔧 Migrated from Chrome identity API to Firebase
+- 📊 Enhanced authentication flow and security
+- 🚀 Improved extension performance and reliability
 
 ### Fixed
-- Authentication persistence issues
-- File upload reliability
-- Extension initialization
+- 🖼️ Icon transparency issues for proper Chrome toolbar display
+- 🔐 Authentication persistence issues
+- 📁 File upload reliability and error handling
+- ⚡ Extension initialization and loading
+- 🎯 Text selection functionality across different sites
 
 ---
 

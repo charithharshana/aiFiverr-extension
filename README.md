@@ -1,6 +1,6 @@
 # aiFiverr Extension
 
-AI-powered Fiverr assistant with Firebase authentication and cloud storage.
+🤖 AI-powered Fiverr assistant with Firebase authentication and cloud storage.
 
 ## 🚀 Quick Install
 
@@ -29,23 +29,36 @@ AI-powered Fiverr assistant with Firebase authentication and cloud storage.
 
 ## 📋 Features
 
-- ✨ AI-powered conversation analysis
-- 🤖 Smart response suggestions
-- 📁 Knowledge base integration
-- 🔄 Multiple API key rotation
-- 💾 Export/import conversations
-- 🔐 Secure Firebase authentication
+- 💬 **Message Icon Design**: Clean blue message bubble icon
+- ✨ **AI-powered conversation analysis**
+- 🤖 **Smart response suggestions**
+- 📁 **Knowledge base integration with Google Drive**
+- 🔄 **Multiple API key rotation**
+- 💾 **Export/import conversations**
+- 🔐 **Secure Firebase authentication**
+- ⌨️ **Customizable keyboard shortcuts**
+- 🎯 **Text selection AI assistance**
+- 📱 **Streaming chat interface**
 
-## 🆘 Support
+## 🆘 Support & Links
+
+- **Help**: [contact@charithharshana.com](mailto:contact@charithharshana.com)
+- **Feedback**: [YouTube Channel](https://www.youtube.com/@wcharithharshana)
+- **User Guide**: [How to Use](https://www.charithharshana.com/aifiverr/user-guide)
+- **Chrome Store**: [Download](https://chromewebstore.google.com/detail/aifiverr/chpbdcphkmeaccddjmdpjcchlgeaipkg)
+- **Source Code**: [GitHub](https://github.com/charithharshana/aiFiverr-extension)
+
+## 🔧 Troubleshooting
 
 If you encounter issues:
 1. Check that API keys are correctly configured
 2. Refresh the Fiverr page
 3. Check browser console for errors
+4. Ensure you're using the latest version
 
 ## 📄 Version
 
-Current version: 2.0.1
+Current version: 2.0.2
 
 ---
 
