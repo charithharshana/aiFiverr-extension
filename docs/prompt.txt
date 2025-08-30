@@ -1,0 +1,84 @@
+### **Core Component: The Knowledgebase Manifest**
+
+The entire system is powered by a "Manifest" stored in `chrome.storage.local`. This is the single source of truth for all your files. It will be an array of objects, where each object represents one file.
+
+**The structure of each file object in the Manifest:**
+
+```json
+{
+  "internalId": "unique-id-12345",
+  "originalFileName": "project-brief.pdf",
+  "googleDriveFileId": "gdrive-permanent-id-abcde",
+  "geminiFileId": "gemini-temporary-id-fghij",
+  "geminiExpirationTimestamp": 1724812800000
+}
+```
+
+*   **`internalId`**: A unique ID you generate upon upload (e.g., a UUID). This is how you'll reliably track the file internally.
+*   **`originalFileName`**: The name you show in the UI.
+*   **`googleDriveFileId`**: The permanent ID from Google Drive. This is your **unexpiring link** to the file's content.
+*   **`geminiFileId`**: The temporary ID from the Gemini API. This is what you use in prompts. It will change every time you refresh.
+*   **`geminiExpirationTimestamp`**: The exact time (in milliseconds) when the Gemini file will expire. You calculate this as `Date.now() + 48 * 60 * 60 * 1000` upon each successful Gemini upload.
+
+---
+
+### **Workflow 1: The Initial Upload Process**
+
+This is the entry point for all files into your system.
+
+1.  **User Action**: The user clicks "Add File" in the extension popup and selects a file from their computer.
+2.  **Extension Logic (a two-step process):**
+    *   **Step A: Gemini First.** The extension immediately takes the file content and uploads it to the Gemini API.
+        *   On success, you get back the `geminiFileId`.
+        *   You immediately calculate the `geminiExpirationTimestamp`.
+    *   **Step B: Google Drive Backup.** The extension takes the *same* file content and uploads it to Google Drive.
+        *   On success, you get back the `googleDriveFileId`.
+    *   **Step C: Create Manifest Record.** The extension creates a new JSON object with all the information: a new `internalId`, the `originalFileName`, the `googleDriveFileId`, the `geminiFileId`, and the `geminiExpirationTimestamp`.
+    *   **Step D: Save and Update.** The extension adds this new object to the Manifest array in `chrome.storage.local` and refreshes the Knowledgebase UI. The user instantly sees their new file with a "Gemini Ready" status.
+
+---
+
+### **Workflow 2: The Floating Icon's "Green Dot" Logic**
+
+This provides the seamless, at-a-glance status the user needs when they are actively working.
+
+1.  **User Action**: The user highlights text and the floating icon appears, showing a list of their prompts.
+2.  **Extension Logic (Dynamic Menu Generation):**
+    *   When rendering the menu, your code identifies which Knowledgebase files are associated with each prompt.
+    *   For each associated file, it performs one simple, crucial check:
+        `const isGeminiReady = Date.now() < file.geminiExpirationTimestamp;`
+    *   If `isGeminiReady` is `true`, you display the file's name with a green dot: `🟢 My-Document.pdf`.
+    *   If `isGeminiReady` is `false`, you display the file's name without the dot: `My-Document.pdf`.
+    *   This provides instant, clear feedback. The user knows that clicking the green-dotted file will work immediately.
+
+---
+
+### **Workflow 3: Individual File Refresh (Per-File Button)**
+
+This is the user's primary tool for re-activating an expired file.
+
+1.  **UI Setup**: In your Knowledgebase list, each file will have its current status displayed (derived from the "Green Dot" logic) and a "Refresh" button (e.g., a 🔄 icon).
+2.  **User Action**: The user sees a file's status is inactive (no green dot) and clicks its dedicated "Refresh" button.
+3.  **Extension Logic:**
+    *   **Step A: Get File Info.** The extension retrieves the file's object from the Manifest using its `internalId`.
+    *   **Step B: Download from Backup.** It uses the `googleDriveFileId` to send a request to the Google Drive API to download the file content. It's important to handle this as a `Blob` to manage memory for large files.
+    *   **Step C: Re-upload to Gemini.** The extension takes the downloaded `Blob` and uploads it to the Gemini API.
+    *   **Step D: Update the Record.** On a successful upload, Gemini returns a **new** `geminiFileId`. Your extension then calculates a **new** `geminiExpirationTimestamp`.
+    *   **Step E: Save Changes.** It finds the corresponding file object in the Manifest and updates *only* the `geminiFileId` and `geminiExpirationTimestamp` fields. It then saves the entire updated Manifest back to `chrome.storage.local`.
+    *   The UI automatically refreshes, and the file's status now shows as "Gemini Ready."
+
+---
+
+### **Workflow 4: Global File Refresh (The Main Button)**
+
+This is a power-user feature for getting everything ready in one go.
+
+1.  **User Action**: The user clicks the main "Refresh All" button in the Knowledgebase section.
+2.  **Extension Logic:**
+    *   **Step A: Show a "Syncing..." State.** The UI should indicate that a bulk operation is in progress.
+    *   **Step B: Loop and Refresh.** The extension retrieves the entire Manifest. It then loops through every file object in the array.
+    *   **Step C: Execute Individual Refresh Logic.** Inside the loop, for each file, it performs the *exact same steps* as in **Workflow 3** (download from Drive, re-upload to Gemini, update the record).
+    *   **Step D: Final Save.** After the loop has completed (or if you want to save after each successful refresh), the extension saves the fully updated Manifest to `chrome.storage.local`.
+    *   **Step E: Update UI.** The "Syncing..." state is removed, and now all files should show a "Gemini Ready" status.
+
+This system is robust, user-friendly, and accomplishes all your goals directly within the extension, using Google Drive as a reliable backend for content and the Manifest as the brain for managing state.
