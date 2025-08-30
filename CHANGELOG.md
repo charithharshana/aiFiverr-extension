@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.3] - 2025-08-30
+## [2.0.4] - 2025-08-30
 
 ### Added
 - 💬 New message icon design with blue gradient background
