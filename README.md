@@ -58,7 +58,7 @@ If you encounter issues:
 
 ## 📄 Version
 
-Current version: 2.0.8
+Current version: 2.0.9
 
 ---
 
