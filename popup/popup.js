@@ -115,8 +115,48 @@ class PopupManager {
       this.toggleFileUploadArea();
     });
 
-    document.getElementById('refreshKbFiles')?.addEventListener('click', () => {
-      this.loadKnowledgeBaseFiles();
+    document.getElementById('refreshKbFiles')?.addEventListener('click', async () => {
+      const refreshBtn = document.getElementById('refreshKbFiles');
+      if (!refreshBtn) return;
+
+      // Disable button and show loading state
+      refreshBtn.disabled = true;
+      const originalText = refreshBtn.textContent;
+      refreshBtn.textContent = '⏳';
+
+      try {
+        console.log('aiFiverr Popup: Refreshing knowledge base files...');
+
+        // First get current files
+        const currentFiles = await this.getKnowledgeBaseFiles();
+
+        // Check for files without Gemini URIs and re-upload them
+        const filesToReupload = currentFiles.filter(file => !file.geminiUri);
+
+        if (filesToReupload.length > 0) {
+          this.showToast(`Re-uploading ${filesToReupload.length} files to Gemini...`, 'info');
+
+          for (const file of filesToReupload) {
+            try {
+              await this.refreshGeminiFile(file.id);
+            } catch (error) {
+              console.warn(`Failed to re-upload ${file.name}:`, error);
+            }
+          }
+        }
+
+        // Reload the knowledge base files to refresh the UI
+        await this.loadKnowledgeBaseFiles();
+
+        this.showToast('Files refreshed successfully', 'success');
+      } catch (error) {
+        console.error('Failed to refresh files:', error);
+        this.showToast('Failed to refresh files', 'error');
+      } finally {
+        // Restore button state
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = originalText;
+      }
     });
 
     document.getElementById('fileInput')?.addEventListener('change', (e) => {

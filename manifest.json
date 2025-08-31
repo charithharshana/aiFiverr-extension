@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "aiFiverr - AI-Powered Fiverr Assistant (Firebase)",
-  "description": "Cross-browser AI-powered Fiverr assistant with Firebase authentication and cloud storage",
+  "name": "aiFiverr AI Web Assistant",
+  "description": "AI-powered web assistant extension that works on fiverr.com or any website",
   "version": "2.1.1",
   "permissions": [
     "activeTab",

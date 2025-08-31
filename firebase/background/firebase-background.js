@@ -67,13 +67,15 @@ async function createOffscreenDocument() {
   }
 }
 
-async function sendMessageToOffscreen(message) {
+async function sendMessageToOffscreen(message, timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error('Offscreen document timeout after 30 seconds'));
-    }, 30000);
+      reject(new Error(`Offscreen document timeout after ${timeoutMs/1000} seconds`));
+    }, timeoutMs);
 
     try {
+      console.log('🔄 Firebase Background: Sending message to offscreen:', message.action);
+
       // Send message directly to offscreen document using chrome.runtime.sendMessage
       // The offscreen document will handle the message and respond via sendResponse
       chrome.runtime.sendMessage(
@@ -82,22 +84,37 @@ async function sendMessageToOffscreen(message) {
           clearTimeout(timeout);
 
           if (chrome.runtime.lastError) {
-            console.error('aiFiverr Background: Offscreen message error:', chrome.runtime.lastError.message);
-            reject(new Error(`Offscreen communication failed: ${chrome.runtime.lastError.message}`));
+            const errorMsg = chrome.runtime.lastError.message;
+            console.error('❌ Firebase Background: Offscreen message error:', errorMsg);
+
+            // Handle specific error cases
+            if (errorMsg.includes('Receiving end does not exist')) {
+              reject(new Error('Offscreen document not ready or crashed. Please try again.'));
+            } else if (errorMsg.includes('message port closed')) {
+              reject(new Error('Communication channel closed. Please try again.'));
+            } else {
+              reject(new Error(`Offscreen communication failed: ${errorMsg}`));
+            }
             return;
           }
 
           if (!response) {
+            console.error('❌ Firebase Background: No response from offscreen document');
             reject(new Error('No response received from offscreen document'));
             return;
           }
 
-          console.log('aiFiverr Background: Received offscreen response:', response);
+          console.log('✅ Firebase Background: Received offscreen response:', {
+            success: response.success,
+            hasUser: !!response.user,
+            hasError: !!response.error
+          });
           resolve(response);
         }
       );
     } catch (error) {
       clearTimeout(timeout);
+      console.error('❌ Firebase Background: Exception in sendMessageToOffscreen:', error);
       reject(error);
     }
   });
@@ -276,35 +293,47 @@ async function handleFirebaseAuthStart(sendResponse) {
     // Create offscreen document for Firebase authentication
     await createOffscreenDocument();
 
-    // Add a small delay to ensure offscreen document is fully loaded
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Add longer delay to ensure offscreen document and iframe are fully loaded
+    console.log('🔐 Firebase Background: Waiting for offscreen document to initialize...');
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Increased from 500ms to 2000ms
 
-    // Send authentication request to offscreen document with retry logic
+    // Send authentication request to offscreen document with improved retry logic
     let authResult = null;
     let lastError = null;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 5; attempt++) { // Increased from 3 to 5 attempts
       try {
-        console.log(`🔐 Firebase Background: Authentication attempt ${attempt}/3`);
+        console.log(`🔐 Firebase Background: Authentication attempt ${attempt}/5`);
 
-        authResult = await sendMessageToOffscreen({
-          action: 'firebase-auth'
-        });
+        // Use exponential backoff for retries
+        const timeout = Math.min(5000 * Math.pow(2, attempt - 1), 45000); // Max 45 seconds
+
+        authResult = await Promise.race([
+          sendMessageToOffscreen({
+            action: 'firebase-auth'
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Authentication timeout after ${timeout/1000}s`)), timeout)
+          )
+        ]);
 
         if (authResult && authResult.success) {
+          console.log('✅ Firebase Background: Authentication successful on attempt', attempt);
           break; // Success, exit retry loop
         } else {
           lastError = new Error(authResult?.error || 'Authentication failed');
-          if (attempt < 3) {
-            console.warn(`⚠️ Firebase Background: Auth attempt ${attempt} failed, retrying...`, lastError.message);
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+          if (attempt < 5) {
+            const retryDelay = Math.min(2000 * attempt, 8000); // Progressive delay: 2s, 4s, 6s, 8s
+            console.warn(`⚠️ Firebase Background: Auth attempt ${attempt} failed, retrying in ${retryDelay/1000}s...`, lastError.message);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
           }
         }
       } catch (error) {
         lastError = error;
-        if (attempt < 3) {
-          console.warn(`⚠️ Firebase Background: Auth attempt ${attempt} failed with error, retrying...`, error.message);
-          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        if (attempt < 5) {
+          const retryDelay = Math.min(2000 * attempt, 8000); // Progressive delay
+          console.warn(`⚠️ Firebase Background: Auth attempt ${attempt} failed with error, retrying in ${retryDelay/1000}s...`, error.message);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
         }
       }
     }
