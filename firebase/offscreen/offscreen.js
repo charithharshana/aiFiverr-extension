@@ -16,28 +16,7 @@ function init() {
   statusElement = document.getElementById('status');
   iframe = document.getElementById('authFrame');
 
-  // Add timeout for iframe loading
-  const iframeTimeout = setTimeout(() => {
-    if (!iframe.contentDocument || iframe.contentDocument.readyState !== 'complete') {
-      console.warn('aiFiverr Offscreen: Auth iframe loading timeout');
-      updateStatus('Authentication service loading slowly...', 'loading');
-    }
-  }, 5000);
-
-  // Set up iframe with better error handling (single handler)
-  iframe.onload = () => {
-    clearTimeout(iframeTimeout);
-    console.log('aiFiverr Offscreen: Auth iframe loaded successfully');
-    updateStatus('Authentication service ready', 'success');
-  };
-
-  iframe.onerror = (error) => {
-    clearTimeout(iframeTimeout);
-    console.error('aiFiverr Offscreen: Auth iframe failed to load:', error);
-    updateStatus('Failed to load authentication service', 'error');
-  };
-
-  // Set iframe source
+  // Set up iframe
   iframe.src = FIREBASE_AUTH_URL;
 
   // Listen for messages from the iframe
@@ -182,16 +161,11 @@ function handleFirebaseAuth(sendResponse) {
   // Add the message listener
   window.addEventListener('message', handleAuthResponse);
 
-  // Send authentication request to iframe with improved retry logic
-  const sendAuthRequest = (attempt = 1, maxAttempts = 5) => {
+  // Send authentication request to iframe with retry logic
+  const sendAuthRequest = () => {
     try {
       if (!iframe.contentWindow) {
-        if (attempt < maxAttempts) {
-          console.log(`aiFiverr Offscreen: Iframe not ready, retrying (${attempt}/${maxAttempts})...`);
-          setTimeout(() => sendAuthRequest(attempt + 1, maxAttempts), 1000 * attempt);
-          return;
-        }
-        throw new Error('Iframe not ready after maximum attempts');
+        throw new Error('Iframe not ready');
       }
 
       console.log('aiFiverr Offscreen: Sending auth request to iframe');
@@ -207,25 +181,16 @@ function handleFirebaseAuth(sendResponse) {
       window.removeEventListener('message', handleAuthResponse);
       sendResponse({
         success: false,
-        error: 'Failed to communicate with authentication service: ' + error.message
+        error: 'Failed to communicate with authentication service'
       });
     }
   };
 
-  // Wait for iframe to be ready, then send request with improved timing
+  // Wait a bit for iframe to be ready, then send request
   if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
-    // Iframe is already loaded
-    setTimeout(() => sendAuthRequest(), 500);
+    sendAuthRequest();
   } else {
-    // Wait for iframe to load
-    const checkIframeReady = () => {
-      if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
-        setTimeout(() => sendAuthRequest(), 500);
-      } else {
-        setTimeout(checkIframeReady, 500);
-      }
-    };
-    setTimeout(checkIframeReady, 1000);
+    setTimeout(sendAuthRequest, 1000);
   }
 }
 

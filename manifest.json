@@ -54,6 +54,7 @@
       "js": [
         "firebase/firebase-config.js",
         "firebase/database/firebase-database-service.js",
+        "firebase/migration/data-migration.js",
         "content/libs/showdown.min.js",
         "content/utils/helpers.js",
         "content/utils/storage.js",
