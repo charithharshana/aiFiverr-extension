@@ -2120,12 +2120,7 @@ class KnowledgeBaseManager {
   async uploadFileToGoogleDrive(file, fileName, description = '') {
     try {
       if (!window.googleAuthService || !window.googleAuthService.isUserAuthenticated()) {
-        // Try to trigger authentication recovery
-        if (window.authRecoveryManager) {
-          console.log('aiFiverr KB: Triggering authentication recovery for Google Drive access');
-          window.authRecoveryManager.triggerRecovery('google_drive_access_required');
-        }
-        throw new Error('Authentication required to access knowledge base files');
+        throw new Error('Google authentication required');
       }
 
       if (!window.googleDriveClient) {

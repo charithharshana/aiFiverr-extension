@@ -4,8 +4,7 @@
  */
 
 // Firebase hosting URL - Updated to use the correct ai-fiverr project
-// Using .firebaseapp.com domain for better OAuth compatibility
-const FIREBASE_AUTH_URL = 'https://ai-fiverr.firebaseapp.com/auth.html';
+const FIREBASE_AUTH_URL = 'https://ai-fiverr.web.app/auth.html';
 
 let iframe;
 let statusElement;
@@ -18,29 +17,36 @@ function init() {
   iframe = document.getElementById('authFrame');
 
   // Set up iframe with better error handling
+  let iframeLoaded = false;
+
   iframe.onload = () => {
+    iframeLoaded = true;
+    clearTimeout(iframeTimeout);
     console.log('aiFiverr Offscreen: Auth iframe loaded successfully');
     updateStatus('Authentication service ready', 'success');
   };
 
   iframe.onerror = (error) => {
+    clearTimeout(iframeTimeout);
     console.error('aiFiverr Offscreen: Auth iframe failed to load:', error);
     updateStatus('Failed to load authentication service', 'error');
   };
 
   // Add timeout for iframe loading
   const iframeTimeout = setTimeout(() => {
-    if (!iframe.contentDocument || iframe.contentDocument.readyState !== 'complete') {
-      console.warn('aiFiverr Offscreen: Auth iframe loading timeout');
-      updateStatus('Authentication service loading slowly...', 'loading');
-    }
-  }, 5000);
+    if (!iframeLoaded) {
+      console.warn('aiFiverr Offscreen: Auth iframe loading timeout after 10 seconds');
+      updateStatus('Authentication service loading slowly, please wait...', 'loading');
 
-  iframe.onload = () => {
-    clearTimeout(iframeTimeout);
-    console.log('aiFiverr Offscreen: Auth iframe loaded successfully');
-    updateStatus('Authentication service ready', 'success');
-  };
+      // Try to reload the iframe
+      setTimeout(() => {
+        if (!iframeLoaded) {
+          console.log('aiFiverr Offscreen: Attempting to reload iframe...');
+          iframe.src = FIREBASE_AUTH_URL + '?retry=' + Date.now();
+        }
+      }, 5000);
+    }
+  }, 10000); // Increased timeout to 10 seconds
 
   iframe.src = FIREBASE_AUTH_URL;
 
@@ -100,46 +106,28 @@ function handleFirebaseAuth(sendResponse) {
   console.log('aiFiverr Offscreen: Starting Firebase authentication');
   updateStatus('Starting authentication...', 'loading');
 
-  // Prevent multiple simultaneous authentication attempts
-  if (window.authInProgress) {
-    console.warn('aiFiverr Offscreen: Authentication already in progress');
-    sendResponse({
-      success: false,
-      error: 'Authentication already in progress'
-    });
-    return;
-  }
-
-  window.authInProgress = true;
-
   // Add timeout for authentication process
   const authTimeout = setTimeout(() => {
-    console.error('aiFiverr Offscreen: Authentication timeout after 45 seconds');
+    console.error('aiFiverr Offscreen: Authentication timeout after 60 seconds');
     updateStatus('Authentication timeout - please try again', 'error');
-    cleanup();
+    window.removeEventListener('message', handleAuthResponse);
     sendResponse({
       success: false,
-      error: 'Authentication timeout after 45 seconds. Please try again.'
+      error: 'Authentication timeout after 60 seconds. Please try again.'
     });
-  }, 45000); // Reduced from 60s to 45s
-
-  // Cleanup function to prevent memory leaks
-  function cleanup() {
-    window.authInProgress = false;
-    clearTimeout(authTimeout);
-    window.removeEventListener('message', handleAuthResponse);
-  }
+  }, 60000); // 60 second timeout
 
   // Set up message listener for iframe response
   function handleAuthResponse(event) {
     try {
-      // Validate event origin for security
-      if (event.origin !== new URL(FIREBASE_AUTH_URL).origin) {
+      console.log('aiFiverr Offscreen: Received auth response from iframe:', event.origin, event.data);
+
+      // Verify origin for security
+      const allowedOrigin = new URL(FIREBASE_AUTH_URL).origin;
+      if (event.origin !== allowedOrigin) {
         console.warn('aiFiverr Offscreen: Ignoring message from unauthorized origin:', event.origin);
         return;
       }
-
-      console.log('aiFiverr Offscreen: Received auth response from iframe');
 
       // Parse the response data
       let data;
@@ -161,11 +149,13 @@ function handleFirebaseAuth(sendResponse) {
 
       // Only process authentication responses
       if (!data || typeof data !== 'object' || !data.hasOwnProperty('success')) {
+        console.log('aiFiverr Offscreen: Ignoring non-auth message:', data);
         return;
       }
 
       // Clear timeout and remove event listener
-      cleanup();
+      clearTimeout(authTimeout);
+      window.removeEventListener('message', handleAuthResponse);
 
       if (data.success) {
         console.log('aiFiverr Offscreen: Authentication successful');
@@ -210,10 +200,10 @@ function handleFirebaseAuth(sendResponse) {
   // Add the message listener
   window.addEventListener('message', handleAuthResponse);
 
-  // Send authentication request to iframe with improved timing
+  // Send authentication request to iframe with retry logic
   const sendAuthRequest = () => {
     try {
-      if (!iframe || !iframe.contentWindow) {
+      if (!iframe.contentWindow) {
         throw new Error('Iframe not ready');
       }
 
@@ -226,7 +216,8 @@ function handleFirebaseAuth(sendResponse) {
       console.error('aiFiverr Offscreen: Failed to send auth message to iframe:', error);
       updateStatus('Failed to start authentication', 'error');
 
-      cleanup();
+      clearTimeout(authTimeout);
+      window.removeEventListener('message', handleAuthResponse);
       sendResponse({
         success: false,
         error: 'Failed to communicate with authentication service'
@@ -234,19 +225,12 @@ function handleFirebaseAuth(sendResponse) {
     }
   };
 
-  // Improved iframe readiness detection
-  const waitForIframeReady = () => {
-    if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
-      console.log('aiFiverr Offscreen: Iframe ready, sending auth request');
-      sendAuthRequest();
-    } else {
-      console.log('aiFiverr Offscreen: Waiting for iframe to load...');
-      setTimeout(waitForIframeReady, 500);
-    }
-  };
-
-  // Start waiting for iframe to be ready
-  waitForIframeReady();
+  // Wait a bit for iframe to be ready, then send request
+  if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
+    sendAuthRequest();
+  } else {
+    setTimeout(sendAuthRequest, 1000);
+  }
 }
 
 /**
