@@ -109,12 +109,14 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
 
-        // Google Auth Provider with required scopes
+        // Google Auth Provider - Updated scopes to resolve incremental authorization issue
         const provider = new GoogleAuthProvider();
         provider.addScope('https://www.googleapis.com/auth/userinfo.email');
         provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-        provider.addScope('https://www.googleapis.com/auth/spreadsheets');
-        provider.addScope('https://www.googleapis.com/auth/drive'); // Full Drive access for folder management
+        // Removed spreadsheets scope - using Firebase instead of Google Sheets
+        // provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+        // Changed to more restrictive Drive scope to resolve verification issues
+        provider.addScope('https://www.googleapis.com/auth/drive.file'); // Only files created by the app
 
         // Get reference to parent frame for postMessage
         const PARENT_FRAME = document.location.ancestorOrigins?.[0] || window.parent.location.origin;
