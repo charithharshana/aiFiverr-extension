@@ -16,38 +16,7 @@ function init() {
   statusElement = document.getElementById('status');
   iframe = document.getElementById('authFrame');
 
-  // Set up iframe with better error handling
-  let iframeLoaded = false;
-
-  iframe.onload = () => {
-    iframeLoaded = true;
-    clearTimeout(iframeTimeout);
-    console.log('aiFiverr Offscreen: Auth iframe loaded successfully');
-    updateStatus('Authentication service ready', 'success');
-  };
-
-  iframe.onerror = (error) => {
-    clearTimeout(iframeTimeout);
-    console.error('aiFiverr Offscreen: Auth iframe failed to load:', error);
-    updateStatus('Failed to load authentication service', 'error');
-  };
-
-  // Add timeout for iframe loading
-  const iframeTimeout = setTimeout(() => {
-    if (!iframeLoaded) {
-      console.warn('aiFiverr Offscreen: Auth iframe loading timeout after 10 seconds');
-      updateStatus('Authentication service loading slowly, please wait...', 'loading');
-
-      // Try to reload the iframe
-      setTimeout(() => {
-        if (!iframeLoaded) {
-          console.log('aiFiverr Offscreen: Attempting to reload iframe...');
-          iframe.src = FIREBASE_AUTH_URL + '?retry=' + Date.now();
-        }
-      }, 5000);
-    }
-  }, 10000); // Increased timeout to 10 seconds
-
+  // Set up iframe
   iframe.src = FIREBASE_AUTH_URL;
 
   // Listen for messages from the iframe
@@ -64,7 +33,7 @@ function init() {
     chrome.offscreen.onMessage.addListener(handleExtensionMessage);
   }
 
-  updateStatus('Initializing authentication service...', 'loading');
+  updateStatus('Ready for authentication', 'loading');
 }
 
 /**
@@ -78,25 +47,26 @@ function handleExtensionMessage(message, sender, sendResponse) {
     return false;
   }
 
-  try {
-    if (message.action === 'firebase-auth') {
-      console.log('aiFiverr Offscreen: Handling Firebase auth request');
-      handleFirebaseAuth(sendResponse);
-      return true; // Indicates async response
-    } else if (message.action === 'firebase-signout') {
-      console.log('aiFiverr Offscreen: Handling Firebase signout request');
-      handleFirebaseSignOut(sendResponse);
-      return true; // Indicates async response
-    } else {
-      console.warn('aiFiverr Offscreen: Unknown action:', message.action);
-      sendResponse({ success: false, error: 'Unknown action: ' + message.action });
-      return false;
-    }
-  } catch (error) {
-    console.error('aiFiverr Offscreen: Error handling message:', error);
-    sendResponse({ success: false, error: error.message });
-    return false;
+  // Create a response function that includes the message ID
+  const responseWithId = (response) => {
+    const responseMessage = {
+      ...response,
+      responseToMessageId: message.messageId
+    };
+
+    // Send response back to background script
+    chrome.runtime.sendMessage(responseMessage);
+  };
+
+  if (message.action === 'firebase-auth') {
+    handleFirebaseAuth(responseWithId);
+    return true; // Indicates async response
+  } else if (message.action === 'firebase-signout') {
+    handleFirebaseSignOut(responseWithId);
+    return true;
   }
+
+  return false;
 }
 
 /**
@@ -106,28 +76,10 @@ function handleFirebaseAuth(sendResponse) {
   console.log('aiFiverr Offscreen: Starting Firebase authentication');
   updateStatus('Starting authentication...', 'loading');
 
-  // Add timeout for authentication process
-  const authTimeout = setTimeout(() => {
-    console.error('aiFiverr Offscreen: Authentication timeout after 60 seconds');
-    updateStatus('Authentication timeout - please try again', 'error');
-    window.removeEventListener('message', handleAuthResponse);
-    sendResponse({
-      success: false,
-      error: 'Authentication timeout after 60 seconds. Please try again.'
-    });
-  }, 60000); // 60 second timeout
-
   // Set up message listener for iframe response
   function handleAuthResponse(event) {
     try {
-      console.log('aiFiverr Offscreen: Received auth response from iframe:', event.origin, event.data);
-
-      // Verify origin for security
-      const allowedOrigin = new URL(FIREBASE_AUTH_URL).origin;
-      if (event.origin !== allowedOrigin) {
-        console.warn('aiFiverr Offscreen: Ignoring message from unauthorized origin:', event.origin);
-        return;
-      }
+      console.log('aiFiverr Offscreen: Received auth response from iframe');
 
       // Parse the response data
       let data;
@@ -137,46 +89,29 @@ function handleFirebaseAuth(sendResponse) {
           // Ignore Firebase internal messages
           return;
         }
-        try {
-          data = JSON.parse(event.data);
-        } catch (parseError) {
-          console.warn('aiFiverr Offscreen: Failed to parse response data:', event.data);
-          return;
-        }
+        data = JSON.parse(event.data);
       } else {
         data = event.data;
       }
 
-      // Only process authentication responses
-      if (!data || typeof data !== 'object' || !data.hasOwnProperty('success')) {
-        console.log('aiFiverr Offscreen: Ignoring non-auth message:', data);
-        return;
-      }
-
-      // Clear timeout and remove event listener
-      clearTimeout(authTimeout);
+      // Remove the event listener
       window.removeEventListener('message', handleAuthResponse);
 
       if (data.success) {
         console.log('aiFiverr Offscreen: Authentication successful');
-        console.log('aiFiverr Offscreen: Received comprehensive user data:', {
-          user: data.user,
-          additionalUserInfo: data.additionalUserInfo
-        });
         updateStatus('Authentication successful!', 'success');
 
-        // Send comprehensive response back to extension
+        // Send success response back to extension
         sendResponse({
           success: true,
           user: data.user,
-          additionalUserInfo: data.additionalUserInfo,
           accessToken: data.accessToken,
           refreshToken: data.refreshToken
         });
       } else {
         console.error('aiFiverr Offscreen: Authentication failed:', data.error);
         updateStatus('Authentication failed: ' + (data.error || 'Unknown error'), 'error');
-        
+
         // Send error response back to extension
         sendResponse({
           success: false,
@@ -188,7 +123,6 @@ function handleFirebaseAuth(sendResponse) {
       console.error('aiFiverr Offscreen: Error parsing auth response:', error);
       updateStatus('Error processing authentication response', 'error');
 
-      clearTimeout(authTimeout);
       window.removeEventListener('message', handleAuthResponse);
       sendResponse({
         success: false,
@@ -200,36 +134,21 @@ function handleFirebaseAuth(sendResponse) {
   // Add the message listener
   window.addEventListener('message', handleAuthResponse);
 
-  // Send authentication request to iframe with retry logic
-  const sendAuthRequest = () => {
-    try {
-      if (!iframe.contentWindow) {
-        throw new Error('Iframe not ready');
-      }
+  // Send authentication request to iframe
+  try {
+    iframe.contentWindow.postMessage(
+      { action: 'startAuth' },
+      new URL(FIREBASE_AUTH_URL).origin
+    );
+  } catch (error) {
+    console.error('aiFiverr Offscreen: Failed to send auth message to iframe:', error);
+    updateStatus('Failed to start authentication', 'error');
 
-      console.log('aiFiverr Offscreen: Sending auth request to iframe');
-      iframe.contentWindow.postMessage(
-        { action: 'startAuth' },
-        new URL(FIREBASE_AUTH_URL).origin
-      );
-    } catch (error) {
-      console.error('aiFiverr Offscreen: Failed to send auth message to iframe:', error);
-      updateStatus('Failed to start authentication', 'error');
-
-      clearTimeout(authTimeout);
-      window.removeEventListener('message', handleAuthResponse);
-      sendResponse({
-        success: false,
-        error: 'Failed to communicate with authentication service'
-      });
-    }
-  };
-
-  // Wait a bit for iframe to be ready, then send request
-  if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
-    sendAuthRequest();
-  } else {
-    setTimeout(sendAuthRequest, 1000);
+    window.removeEventListener('message', handleAuthResponse);
+    sendResponse({
+      success: false,
+      error: 'Failed to communicate with authentication service'
+    });
   }
 }
 
@@ -316,9 +235,7 @@ function handleIframeMessage(event) {
 function updateStatus(message, type = 'loading') {
   if (statusElement) {
     statusElement.textContent = message;
-    statusElement.className = `status ${type}`;
   }
-  console.log(`aiFiverr Offscreen Status (${type}):`, message);
 }
 
 /**

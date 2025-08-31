@@ -109,30 +109,15 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
 
-        // Google Auth Provider - Updated scopes to resolve incremental authorization issue
+        // Google Auth Provider with required scopes
         const provider = new GoogleAuthProvider();
         provider.addScope('https://www.googleapis.com/auth/userinfo.email');
         provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-        // Removed spreadsheets scope - using Firebase instead of Google Sheets
-        // provider.addScope('https://www.googleapis.com/auth/spreadsheets');
-        // Changed to more restrictive Drive scope to resolve verification issues
-        provider.addScope('https://www.googleapis.com/auth/drive.file'); // Only files created by the app
+        provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+        provider.addScope('https://www.googleapis.com/auth/drive'); // Full Drive access for folder management
 
         // Get reference to parent frame for postMessage
-        // Use '*' for Chrome extension offscreen documents to avoid origin issues
-        let PARENT_FRAME = '*';
-        try {
-          // Try to get the actual origin, but fallback to '*' if it fails
-          if (document.location.ancestorOrigins && document.location.ancestorOrigins.length > 0) {
-            PARENT_FRAME = document.location.ancestorOrigins[0];
-          } else if (window.parent !== window) {
-            // We're in an iframe, use '*' for Chrome extension context
-            PARENT_FRAME = '*';
-          }
-        } catch (error) {
-          console.log('aiFiverr Firebase Web Auth: Using wildcard origin due to security restrictions');
-          PARENT_FRAME = '*';
-        }
+        const PARENT_FRAME = document.location.ancestorOrigins?.[0] || window.parent.location.origin;
 
         // DOM elements
         let statusElement = document.getElementById('status');
@@ -176,52 +161,18 @@
             const accessToken = credential.accessToken;
 
             console.log('aiFiverr Firebase Web Auth: Sign in successful:', user.email);
-            console.log('aiFiverr Firebase Web Auth: Full result object:', {
-              user: user,
-              credential: credential,
-              additionalUserInfo: result.additionalUserInfo
-            });
             updateStatus('Sign in successful!', 'success');
 
-            // Extract comprehensive user data including OAuth profile
-            const comprehensiveUserData = {
-              // Core Firebase user data
-              uid: user.uid,
-              email: user.email,
-              displayName: user.displayName,
-              photoURL: user.photoURL,
-              emailVerified: user.emailVerified,
-              phoneNumber: user.phoneNumber,
-
-              // Account metadata
-              creationTime: user.metadata?.creationTime,
-              lastSignInTime: user.metadata?.lastSignInTime,
-
-              // Provider information
-              providerId: user.providerId,
-              providerData: user.providerData || [],
-
-              // Token information
-              refreshToken: user.refreshToken
-            };
-
-            // Extract additional OAuth profile data if available
-            let additionalUserInfo = null;
-            if (result.additionalUserInfo) {
-              additionalUserInfo = {
-                providerId: result.additionalUserInfo.providerId,
-                isNewUser: result.additionalUserInfo.isNewUser,
-                profile: result.additionalUserInfo.profile || {}
-              };
-
-              console.log('aiFiverr Firebase Web Auth: Additional user info:', additionalUserInfo);
-            }
-
-            // Send comprehensive response to parent
+            // Send success response to parent
             sendResponseToParent({
               success: true,
-              user: comprehensiveUserData,
-              additionalUserInfo: additionalUserInfo,
+              user: {
+                uid: user.uid,
+                email: user.email,
+                displayName: user.displayName,
+                photoURL: user.photoURL,
+                emailVerified: user.emailVerified
+              },
               accessToken: accessToken,
               refreshToken: user.refreshToken
             });
@@ -283,40 +234,16 @@
         function sendResponseToParent(data) {
           try {
             console.log('aiFiverr Firebase Web Auth: Sending response to parent:', data);
-            console.log('aiFiverr Firebase Web Auth: Using target origin:', PARENT_FRAME);
-
-            // Send both JSON string and object for compatibility
-            window.parent.postMessage(data, PARENT_FRAME);
-
-            // Also try sending as JSON string for backward compatibility
-            setTimeout(() => {
-              try {
-                window.parent.postMessage(JSON.stringify(data), PARENT_FRAME);
-              } catch (jsonError) {
-                console.warn('aiFiverr Firebase Web Auth: JSON string message failed:', jsonError);
-              }
-            }, 100);
-
+            window.parent.postMessage(JSON.stringify(data), PARENT_FRAME);
           } catch (error) {
             console.error('aiFiverr Firebase Web Auth: Failed to send response to parent:', error);
-
-            // Try alternative messaging approaches
-            try {
-              // Try with wildcard origin as fallback
-              window.parent.postMessage(data, '*');
-              console.log('aiFiverr Firebase Web Auth: Fallback message sent with wildcard origin');
-            } catch (fallbackError) {
-              console.error('aiFiverr Firebase Web Auth: All messaging attempts failed:', fallbackError);
-            }
           }
         }
 
         function updateStatus(message, type = 'loading') {
           if (statusElement) {
             statusElement.textContent = message;
-            statusElement.className = `status ${type}`;
           }
-          console.log(`aiFiverr Firebase Web Auth Status (${type}):`, message);
         }
 
         function updateUI(user) {
@@ -324,7 +251,6 @@
             // User is signed in
             if (signInButton) signInButton.style.display = 'none';
             if (signOutButton) signOutButton.style.display = 'inline-block';
-            updateStatus(`Signed in as ${user.email}`, 'success');
           } else {
             // User is signed out
             if (signInButton) signInButton.style.display = 'inline-block';
