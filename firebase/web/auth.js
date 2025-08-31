@@ -39,6 +39,11 @@ provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
 // Changed to more restrictive Drive scope to resolve verification issues
 provider.addScope('https://www.googleapis.com/auth/drive.file'); // Only files created by the app
 
+// Force account selection to avoid cached authentication issues
+provider.setCustomParameters({
+  prompt: 'select_account'
+});
+
 // Get reference to parent frame for postMessage
 const PARENT_FRAME = document.location.ancestorOrigins?.[0] || window.parent.location.origin;
 

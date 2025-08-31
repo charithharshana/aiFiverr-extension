@@ -109,12 +109,19 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
 
-        // Google Auth Provider with required scopes
+        // Google Auth Provider - Updated scopes to resolve incremental authorization issue
         const provider = new GoogleAuthProvider();
         provider.addScope('https://www.googleapis.com/auth/userinfo.email');
         provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
-        provider.addScope('https://www.googleapis.com/auth/spreadsheets');
-        provider.addScope('https://www.googleapis.com/auth/drive'); // Full Drive access for folder management
+        // Removed spreadsheets scope - using Firebase instead of Google Sheets
+        // provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+        // Changed to more restrictive Drive scope to resolve verification issues
+        provider.addScope('https://www.googleapis.com/auth/drive.file'); // Only files created by the app
+
+        // Force account selection to avoid cached authentication issues
+        provider.setCustomParameters({
+          prompt: 'select_account'
+        });
 
         // Get reference to parent frame for postMessage
         const PARENT_FRAME = document.location.ancestorOrigins?.[0] || window.parent.location.origin;
@@ -161,18 +168,52 @@
             const accessToken = credential.accessToken;
 
             console.log('aiFiverr Firebase Web Auth: Sign in successful:', user.email);
+            console.log('aiFiverr Firebase Web Auth: Full result object:', {
+              user: user,
+              credential: credential,
+              additionalUserInfo: result.additionalUserInfo
+            });
             updateStatus('Sign in successful!', 'success');
 
-            // Send success response to parent
+            // Extract comprehensive user data including OAuth profile
+            const comprehensiveUserData = {
+              // Core Firebase user data
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              photoURL: user.photoURL,
+              emailVerified: user.emailVerified,
+              phoneNumber: user.phoneNumber,
+
+              // Account metadata
+              creationTime: user.metadata?.creationTime,
+              lastSignInTime: user.metadata?.lastSignInTime,
+
+              // Provider information
+              providerId: user.providerId,
+              providerData: user.providerData || [],
+
+              // Token information
+              refreshToken: user.refreshToken
+            };
+
+            // Extract additional OAuth profile data if available
+            let additionalUserInfo = null;
+            if (result.additionalUserInfo) {
+              additionalUserInfo = {
+                providerId: result.additionalUserInfo.providerId,
+                isNewUser: result.additionalUserInfo.isNewUser,
+                profile: result.additionalUserInfo.profile || {}
+              };
+
+              console.log('aiFiverr Firebase Web Auth: Additional user info:', additionalUserInfo);
+            }
+
+            // Send comprehensive response to parent
             sendResponseToParent({
               success: true,
-              user: {
-                uid: user.uid,
-                email: user.email,
-                displayName: user.displayName,
-                photoURL: user.photoURL,
-                emailVerified: user.emailVerified
-              },
+              user: comprehensiveUserData,
+              additionalUserInfo: additionalUserInfo,
               accessToken: accessToken,
               refreshToken: user.refreshToken
             });
@@ -243,7 +284,9 @@
         function updateStatus(message, type = 'loading') {
           if (statusElement) {
             statusElement.textContent = message;
+            statusElement.className = `status ${type}`;
           }
+          console.log(`aiFiverr Firebase Web Auth Status (${type}):`, message);
         }
 
         function updateUI(user) {
@@ -251,6 +294,7 @@
             // User is signed in
             if (signInButton) signInButton.style.display = 'none';
             if (signOutButton) signOutButton.style.display = 'inline-block';
+            updateStatus(`Signed in as ${user.email}`, 'success');
           } else {
             // User is signed out
             if (signInButton) signInButton.style.display = 'inline-block';
