@@ -4,9 +4,6 @@
  * Handles all Firebase operations in the background
  */
 
-// Import Firebase configuration
-importScripts('../firebase-config.js');
-
 // Authentication state
 let authState = {
   isAuthenticated: false,
@@ -21,6 +18,17 @@ let firebaseApp = null;
 let firebaseAuth = null;
 let firebaseFirestore = null;
 
+// Firebase configuration - inline to avoid import issues
+const firebaseConfig = {
+  apiKey: "AIzaSyCelf-I9gafjAtydLL3_5n6z-hhdoeQn5A",
+  authDomain: "ai-fiverr.firebaseapp.com",
+  projectId: "ai-fiverr",
+  storageBucket: "ai-fiverr.firebasestorage.app",
+  messagingSenderId: "423530712122",
+  appId: "1:423530712122:web:b3e7f12ee346031371b903",
+  measurementId: "G-NN00R02JB9"
+};
+
 console.log('🚀 Firebase Background: Service worker starting...');
 
 /**
@@ -34,18 +42,15 @@ async function initializeFirebase() {
 
     console.log('🔥 Firebase Background: Initializing Firebase services...');
 
-    // Get Firebase configuration
-    const config = self.firebaseConfigManager.getConfig();
-
     // Import Firebase modules dynamically
     const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
-    const { getAuth, signInWithPopup, signOut, GoogleAuthProvider, onAuthStateChanged } = 
+    const { getAuth, signInWithPopup, signOut, GoogleAuthProvider, onAuthStateChanged } =
       await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
-    const { getFirestore, doc, setDoc, getDoc, updateDoc } = 
+    const { getFirestore, doc, setDoc, getDoc, updateDoc } =
       await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js');
 
     // Initialize Firebase app
-    firebaseApp = initializeApp(config);
+    firebaseApp = initializeApp(firebaseConfig);
     firebaseAuth = getAuth(firebaseApp);
     firebaseFirestore = getFirestore(firebaseApp);
 
@@ -57,6 +62,14 @@ async function initializeFirebase() {
 
     // Store provider for later use
     self.googleAuthProvider = provider;
+
+    // Store Firebase modules for later use
+    self.signOut = signOut;
+    self.doc = doc;
+    self.setDoc = setDoc;
+    self.getDoc = getDoc;
+    self.updateDoc = updateDoc;
+    self.signInWithPopup = signInWithPopup;
 
     // Monitor auth state changes
     onAuthStateChanged(firebaseAuth, (user) => {
@@ -226,7 +239,7 @@ async function performFirebaseAuth(firebaseConfig) {
   try {
     // Import Firebase modules
     const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
-    const { getAuth, signInWithPopup, GoogleAuthProvider } = 
+    const { getAuth, signInWithPopup, GoogleAuthProvider } =
       await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
 
     // Initialize Firebase
@@ -243,6 +256,9 @@ async function performFirebaseAuth(firebaseConfig) {
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
 
+    // Get access token
+    const accessToken = await user.getIdToken();
+
     // Send result back to background script
     chrome.runtime.sendMessage({
       type: 'FIREBASE_AUTH_RESULT',
@@ -254,7 +270,9 @@ async function performFirebaseAuth(firebaseConfig) {
           displayName: user.displayName,
           photoURL: user.photoURL,
           emailVerified: user.emailVerified
-        }
+        },
+        accessToken: accessToken,
+        refreshToken: user.refreshToken
       }
     });
 
@@ -281,8 +299,8 @@ async function handleFirebaseSignOut(sendResponse) {
     await initializeFirebase();
 
     // Sign out from Firebase
-    if (firebaseAuth) {
-      await signOut(firebaseAuth);
+    if (firebaseAuth && self.signOut) {
+      await self.signOut(firebaseAuth);
     }
 
     // Clear local auth state
@@ -312,7 +330,7 @@ async function storeUserDataInFirestore(user) {
       await initializeFirebase();
     }
 
-    const userDoc = doc(firebaseFirestore, 'users', user.uid);
+    const userDoc = self.doc(firebaseFirestore, 'users', user.uid);
     const userData = {
       uid: user.uid,
       email: user.email,
@@ -324,16 +342,16 @@ async function storeUserDataInFirestore(user) {
     };
 
     // Check if user exists
-    const existingDoc = await getDoc(userDoc);
+    const existingDoc = await self.getDoc(userDoc);
     if (existingDoc.exists()) {
       // Update existing user
-      await updateDoc(userDoc, {
+      await self.updateDoc(userDoc, {
         ...userData,
         createdAt: existingDoc.data().createdAt // Preserve creation date
       });
     } else {
       // Create new user
-      await setDoc(userDoc, {
+      await self.setDoc(userDoc, {
         ...userData,
         createdAt: new Date().toISOString()
       });
@@ -352,6 +370,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('📨 Firebase Background: Received message:', message.type);
 
   switch (message.type) {
+    case 'PING':
+      console.log('🏓 Firebase Background: Ping received');
+      sendResponse({ success: true, message: 'Firebase Background Service Worker is running' });
+      return false;
+
     case 'FIREBASE_AUTH_START':
       handleFirebaseAuthStart(sendResponse);
       return true; // Async response
@@ -368,7 +391,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     default:
       console.warn('⚠️ Firebase Background: Unknown message type:', message.type);
-      sendResponse({ success: false, error: 'Unknown message type' });
+      sendResponse({ success: false, error: 'Unknown message type: ' + message.type });
       return false;
   }
 });
