@@ -5,21 +5,70 @@
 
 console.log('🚀 aiFiverr Firebase Background: Starting service worker...');
 
-// Authentication state
+// Authentication state with context invalidation protection
 let authState = {
   isAuthenticated: false,
   userInfo: null,
   accessToken: null,
   refreshToken: null,
-  tokenExpiry: null
+  tokenExpiry: null,
+  lastAuthTime: null
 };
 
 // Selection counter state for badge
 let selectionCounter = 0;
 
+// Service Worker lifecycle management
+let contextValid = true;
+let lastHeartbeat = Date.now();
+const HEARTBEAT_INTERVAL = 25000; // 25 seconds (before 30s timeout)
+
+// Keep service worker alive and detect context invalidation
+function maintainServiceWorker() {
+  try {
+    lastHeartbeat = Date.now();
+    contextValid = true;
+
+    // Schedule next heartbeat
+    setTimeout(maintainServiceWorker, HEARTBEAT_INTERVAL);
+
+    console.log('🔄 Firebase Background: Service worker heartbeat');
+  } catch (error) {
+    console.error('❌ Firebase Background: Context invalidated:', error);
+    contextValid = false;
+  }
+}
+
+// Check if extension context is still valid
+function isContextValid() {
+  try {
+    // Test chrome API access
+    if (!chrome.runtime || !chrome.runtime.id) {
+      return false;
+    }
+
+    // Check if too much time has passed since last heartbeat
+    if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL * 2) {
+      return false;
+    }
+
+    return contextValid;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Initialize service worker maintenance
+maintainServiceWorker();
+
 // Load stored authentication state
 async function loadAuthState() {
   try {
+    if (!isContextValid()) {
+      console.warn('⚠️ Firebase Background: Context invalid, cannot load auth state');
+      return;
+    }
+
     const result = await chrome.storage.local.get(['firebase_auth_state']);
     if (result.firebase_auth_state) {
       authState = { ...authState, ...result.firebase_auth_state };
@@ -27,16 +76,29 @@ async function loadAuthState() {
     }
   } catch (error) {
     console.error('❌ Firebase Background: Error loading auth state:', error);
+    if (error.message?.includes('Extension context invalidated')) {
+      contextValid = false;
+    }
   }
 }
 
-// Save authentication state
+// Save authentication state with context validation
 async function saveAuthState() {
   try {
+    if (!isContextValid()) {
+      console.warn('⚠️ Firebase Background: Context invalid, cannot save auth state');
+      return false;
+    }
+
     await chrome.storage.local.set({ firebase_auth_state: authState });
     console.log('✅ Firebase Background: Auth state saved');
+    return true;
   } catch (error) {
     console.error('❌ Firebase Background: Error saving auth state:', error);
+    if (error.message?.includes('Extension context invalidated')) {
+      contextValid = false;
+    }
+    return false;
   }
 }
 
@@ -151,9 +213,20 @@ async function resetSelectionCounter() {
 // Initialize
 loadAuthState();
 
-// Message handler
+// Message handler with context validation
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('📨 Firebase Background: Received message:', message.type);
+
+  // Check context validity before processing
+  if (!isContextValid()) {
+    console.error('❌ Firebase Background: Extension context invalidated, cannot process message');
+    sendResponse({
+      success: false,
+      error: 'Extension context invalidated. Please reload the extension.',
+      contextInvalidated: true
+    });
+    return false;
+  }
 
   switch (message.type) {
     case 'PING':
@@ -162,7 +235,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         success: true,
         message: 'PONG from Firebase Background',
         timestamp: Date.now(),
-        authState: authState.isAuthenticated
+        authState: authState.isAuthenticated,
+        contextValid: isContextValid(),
+        heartbeat: lastHeartbeat
       });
       return false; // Sync response
 
@@ -290,52 +365,52 @@ async function handleFirebaseAuthStart(sendResponse) {
   try {
     console.log('🔐 Firebase Background: Starting Firebase authentication...');
 
+    // Check if already authenticated to prevent unnecessary attempts
+    if (authState.isAuthenticated && authState.tokenExpiry > Date.now()) {
+      console.log('✅ Firebase Background: Already authenticated, returning existing session');
+      sendResponse({
+        success: true,
+        user: authState.userInfo,
+        accessToken: authState.accessToken,
+        refreshToken: authState.refreshToken
+      });
+      return;
+    }
+
+    // Prevent rapid authentication attempts (rate limiting)
+    const now = Date.now();
+    if (authState.lastAuthTime && (now - authState.lastAuthTime) < 5000) {
+      console.warn('⚠️ Firebase Background: Rate limiting - too many auth attempts');
+      sendResponse({
+        success: false,
+        error: 'Please wait a moment before trying to sign in again'
+      });
+      return;
+    }
+
     // Create offscreen document for Firebase authentication
     await createOffscreenDocument();
 
-    // Add longer delay to ensure offscreen document and iframe are fully loaded
+    // Add reasonable delay to ensure offscreen document is ready
     console.log('🔐 Firebase Background: Waiting for offscreen document to initialize...');
-    await new Promise(resolve => setTimeout(resolve, 2000)); // Increased from 500ms to 2000ms
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Reduced from 2000ms to 1500ms
 
-    // Send authentication request to offscreen document with improved retry logic
-    let authResult = null;
-    let lastError = null;
+    // Single authentication attempt with proper timeout
+    console.log('🔐 Firebase Background: Sending authentication request...');
 
-    for (let attempt = 1; attempt <= 5; attempt++) { // Increased from 3 to 5 attempts
-      try {
-        console.log(`🔐 Firebase Background: Authentication attempt ${attempt}/5`);
+    const authResult = await Promise.race([
+      sendMessageToOffscreen({
+        action: 'firebase-auth'
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Authentication timeout after 30 seconds')), 30000)
+      )
+    ]);
 
-        // Use exponential backoff for retries
-        const timeout = Math.min(5000 * Math.pow(2, attempt - 1), 45000); // Max 45 seconds
-
-        authResult = await Promise.race([
-          sendMessageToOffscreen({
-            action: 'firebase-auth'
-          }),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`Authentication timeout after ${timeout/1000}s`)), timeout)
-          )
-        ]);
-
-        if (authResult && authResult.success) {
-          console.log('✅ Firebase Background: Authentication successful on attempt', attempt);
-          break; // Success, exit retry loop
-        } else {
-          lastError = new Error(authResult?.error || 'Authentication failed');
-          if (attempt < 5) {
-            const retryDelay = Math.min(2000 * attempt, 8000); // Progressive delay: 2s, 4s, 6s, 8s
-            console.warn(`⚠️ Firebase Background: Auth attempt ${attempt} failed, retrying in ${retryDelay/1000}s...`, lastError.message);
-            await new Promise(resolve => setTimeout(resolve, retryDelay));
-          }
-        }
-      } catch (error) {
-        lastError = error;
-        if (attempt < 5) {
-          const retryDelay = Math.min(2000 * attempt, 8000); // Progressive delay
-          console.warn(`⚠️ Firebase Background: Auth attempt ${attempt} failed with error, retrying in ${retryDelay/1000}s...`, error.message);
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
-        }
-      }
+    if (authResult && authResult.success) {
+      console.log('✅ Firebase Background: Authentication successful');
+    } else {
+      throw new Error(authResult?.error || 'Authentication failed');
     }
 
     if (authResult && authResult.success) {
@@ -345,12 +420,13 @@ async function handleFirebaseAuthStart(sendResponse) {
       authState.refreshToken = authResult.refreshToken;
       authState.tokenExpiry = Date.now() + (3600 * 1000); // 1 hour
       authState.isAuthenticated = true;
+      authState.lastAuthTime = Date.now(); // Track when authentication occurred
 
       // Save to storage
       await saveAuthState();
 
       console.log('✅ Firebase Background: Authentication successful for:', authResult.user.email);
-      console.log('✅ Firebase Background: Additional user info available:', !!authResult.additionalUserInfo);
+      console.log('✅ Firebase Background: Token expires at:', new Date(authState.tokenExpiry).toISOString());
 
       sendResponse({
         success: true,
@@ -360,7 +436,7 @@ async function handleFirebaseAuthStart(sendResponse) {
         refreshToken: authResult.refreshToken
       });
     } else {
-      throw lastError || new Error('Authentication failed after 3 attempts');
+      throw new Error('Authentication failed');
     }
 
   } catch (error) {

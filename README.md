@@ -45,7 +45,7 @@
 - **Help**: [contact@charithharshana.com](mailto:contact@charithharshana.com)
 - **Feedback**: [YouTube Channel](https://www.youtube.com/@wcharithharshana)
 - **User Guide**: [How to Use](https://www.charithharshana.com/aifiverr/user-guide)
-- **Chrome Store**: [Download](https://chromewebstore.google.com/detail/aifiverr/chpbdcphkmeaccddjmdpjcchlgeaipkg)
+- **Chrome Store**: [Download](https://chromewebstore.google.com/detail/aifiverr/ibmopffcmfmbalahgmponaefabegaipj)
 - **Source Code**: [GitHub](https://github.com/charithharshana/aiFiverr-extension)
 
 ## 🔧 Troubleshooting

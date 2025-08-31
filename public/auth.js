@@ -39,6 +39,13 @@ provider.addScope('https://www.googleapis.com/auth/userinfo.profile');
 // Changed to more restrictive Drive scope to resolve verification issues
 provider.addScope('https://www.googleapis.com/auth/drive.file'); // Only files created by the app
 
+// Configure provider settings for better user experience and prevent loops
+provider.setCustomParameters({
+  prompt: 'select_account',
+  access_type: 'offline',
+  include_granted_scopes: 'true'
+});
+
 // Get reference to parent frame for postMessage
 const PARENT_FRAME = document.location.ancestorOrigins?.[0] || window.parent.location.origin;
 
@@ -95,10 +102,24 @@ async function handleSignIn() {
     console.log('aiFiverr Firebase Web Auth: Starting sign in...');
     updateStatus('Signing in with Google...', 'loading');
 
-    const result = await signInWithPopup(auth, provider);
+    // Prevent multiple simultaneous sign-in attempts
+    if (window.signInInProgress) {
+      console.warn('aiFiverr Firebase Web Auth: Sign in already in progress');
+      return;
+    }
+
+    window.signInInProgress = true;
+
+    // Add timeout to prevent hanging
+    const signInPromise = signInWithPopup(auth, provider);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Sign in timeout after 30 seconds')), 30000)
+    );
+
+    const result = await Promise.race([signInPromise, timeoutPromise]);
     const user = result.user;
     const credential = GoogleAuthProvider.credentialFromResult(result);
-    const accessToken = credential.accessToken;
+    const accessToken = credential?.accessToken;
 
     console.log('aiFiverr Firebase Web Auth: Sign in successful:', user.email);
     updateStatus('Sign in successful!', 'success');
@@ -119,14 +140,18 @@ async function handleSignIn() {
 
   } catch (error) {
     console.error('aiFiverr Firebase Web Auth: Sign in failed:', error);
-    
+
     let errorMessage = 'Sign in failed';
     if (error.code === 'auth/popup-closed-by-user') {
       errorMessage = 'Sign in cancelled by user';
     } else if (error.code === 'auth/popup-blocked') {
-      errorMessage = 'Popup blocked by browser';
+      errorMessage = 'Popup blocked by browser. Please allow popups for this site.';
     } else if (error.code === 'auth/operation-not-allowed') {
       errorMessage = 'Google sign in not enabled';
+    } else if (error.code === 'auth/network-request-failed') {
+      errorMessage = 'Network error. Please check your internet connection.';
+    } else if (error.message?.includes('timeout')) {
+      errorMessage = 'Sign in timeout. Please try again.';
     } else {
       errorMessage = error.message || 'Unknown error occurred';
     }
@@ -139,6 +164,8 @@ async function handleSignIn() {
       error: errorMessage,
       code: error.code
     });
+  } finally {
+    window.signInInProgress = false;
   }
 }
 
