@@ -247,12 +247,12 @@ async function handleFirebaseSignOut(sendResponse) {
   }
 }
 
-// Handle storing user data
+// Handle storing user data with Firebase integration
 async function handleStoreUserData(userData, sendResponse) {
   try {
     console.log('💾 Firebase Background: Storing user data for:', userData.email);
 
-    // Store locally for now (Firebase integration can be added later)
+    // Store locally first for immediate access
     const userDataKey = `firebase_user_data_${userData.email.replace(/[^a-zA-Z0-9]/g, '_')}`;
     await chrome.storage.local.set({
       [userDataKey]: {
@@ -261,12 +261,127 @@ async function handleStoreUserData(userData, sendResponse) {
       }
     });
 
+    // Try to store in Firebase Firestore
+    try {
+      const firestoreResult = await storeUserDataInFirestore(userData);
+      if (firestoreResult.success) {
+        console.log('✅ Firebase Background: User data stored in Firestore');
+      } else {
+        console.warn('⚠️ Firebase Background: Firestore storage failed, using local storage only');
+      }
+    } catch (firestoreError) {
+      console.warn('⚠️ Firebase Background: Firestore storage error:', firestoreError);
+    }
+
     console.log('✅ Firebase Background: User data stored successfully');
     sendResponse({ success: true });
 
   } catch (error) {
     console.error('❌ Firebase Background: Store user data error:', error);
     sendResponse({ success: false, error: error.message });
+  }
+}
+
+// Store user data in Firebase Firestore
+async function storeUserDataInFirestore(userData) {
+  try {
+    if (!authState.accessToken) {
+      throw new Error('No access token available');
+    }
+
+    const docId = userData.email.replace(/[^a-zA-Z0-9]/g, '_');
+    const baseUrl = 'https://firestore.googleapis.com/v1/projects/ai-fiverr/databases/(default)/documents';
+
+    // Check if user exists
+    let existingUser = null;
+    try {
+      const getResponse = await fetch(`${baseUrl}/users/${docId}`, {
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (getResponse.ok) {
+        const existingData = await getResponse.json();
+        existingUser = fromFirestoreDocument(existingData);
+      }
+    } catch (getError) {
+      console.log('Firebase Background: User does not exist, creating new user');
+    }
+
+    // Prepare user document with comprehensive structure
+    const userDoc = {
+      // Core user information
+      email: userData.email,
+      name: userData.name || userData.displayName || '',
+      picture: userData.picture || userData.photoURL || '',
+      id: userData.id || userData.uid || '',
+      given_name: userData.given_name || '',
+      family_name: userData.family_name || '',
+      locale: userData.locale || 'en-US',
+
+      // Comprehensive authentication data
+      uid: userData.uid || userData.id,
+      emailVerified: userData.emailVerified || false,
+      phoneNumber: userData.phoneNumber || null,
+      displayName: userData.displayName || userData.name || '',
+      photoURL: userData.photoURL || userData.picture || '',
+
+      // Account metadata
+      creationTime: userData.creationTime || null,
+      lastSignInTime: userData.lastSignInTime || null,
+      authenticationMethod: userData.authenticationMethod || 'firebase',
+      lastAuthenticationTime: userData.lastAuthenticationTime || new Date().toISOString(),
+
+      // Provider information
+      providerId: userData.providerId || null,
+      providerData: userData.providerData || [],
+      providers: userData.providers || [],
+
+      // Additional OAuth profile data
+      profile: userData.profile || null,
+      verified_email: userData.verified_email || null,
+      hd: userData.hd || null, // Google Workspace domain
+
+      // System fields
+      created: userData.timestamp || new Date().toISOString(),
+      lastLogin: new Date().toISOString(),
+      status: 'active',
+      preferences: getDefaultUserPreferences()
+    };
+
+    // If user exists, preserve existing data and preferences
+    if (existingUser) {
+      userDoc.created = existingUser.created || existingUser.timestamp;
+      userDoc.preferences = { ...getDefaultUserPreferences(), ...existingUser.preferences };
+    }
+
+    // Convert to Firestore format
+    const firestoreDoc = {
+      fields: toFirestoreDocument(userDoc)
+    };
+
+    // Store in Firestore
+    const response = await fetch(`${baseUrl}/users/${docId}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(firestoreDoc)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`Firestore API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+    }
+
+    return { success: true };
+
+  } catch (error) {
+    console.error('Firebase Background: Firestore storage error:', error);
+    return { success: false, error: error.message };
   }
 }
 
@@ -315,6 +430,121 @@ async function handleValidateToken(sendResponse) {
     console.error('❌ Firebase Background: Token validation error:', error);
     sendResponse({ success: false, error: error.message });
   }
+}
+
+// Helper functions for Firestore document conversion
+function toFirestoreDocument(obj) {
+  const fields = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === null || value === undefined) {
+      fields[key] = { nullValue: null };
+    } else if (typeof value === 'string') {
+      fields[key] = { stringValue: value };
+    } else if (typeof value === 'number') {
+      fields[key] = { doubleValue: value };
+    } else if (typeof value === 'boolean') {
+      fields[key] = { booleanValue: value };
+    } else if (value instanceof Date) {
+      fields[key] = { timestampValue: value.toISOString() };
+    } else if (typeof value === 'object' && !Array.isArray(value)) {
+      fields[key] = {
+        mapValue: {
+          fields: toFirestoreDocument(value)
+        }
+      };
+    } else if (Array.isArray(value)) {
+      fields[key] = {
+        arrayValue: {
+          values: value.map(item => {
+            if (typeof item === 'string') return { stringValue: item };
+            if (typeof item === 'number') return { doubleValue: item };
+            if (typeof item === 'boolean') return { booleanValue: item };
+            if (typeof item === 'object') return { mapValue: { fields: toFirestoreDocument(item) } };
+            return { stringValue: String(item) };
+          })
+        }
+      };
+    } else {
+      fields[key] = { stringValue: String(value) };
+    }
+  }
+
+  return fields;
+}
+
+function fromFirestoreDocument(doc) {
+  if (!doc.fields) return {};
+
+  const obj = {};
+
+  for (const [key, value] of Object.entries(doc.fields)) {
+    if (value.stringValue !== undefined) {
+      obj[key] = value.stringValue;
+    } else if (value.doubleValue !== undefined) {
+      obj[key] = value.doubleValue;
+    } else if (value.booleanValue !== undefined) {
+      obj[key] = value.booleanValue;
+    } else if (value.timestampValue !== undefined) {
+      obj[key] = value.timestampValue;
+    } else if (value.nullValue !== undefined) {
+      obj[key] = null;
+    } else if (value.mapValue && value.mapValue.fields) {
+      obj[key] = fromFirestoreDocument({ fields: value.mapValue.fields });
+    } else if (value.arrayValue && value.arrayValue.values) {
+      obj[key] = value.arrayValue.values.map(item => {
+        if (item.stringValue !== undefined) return item.stringValue;
+        if (item.doubleValue !== undefined) return item.doubleValue;
+        if (item.booleanValue !== undefined) return item.booleanValue;
+        if (item.mapValue) return fromFirestoreDocument({ fields: item.mapValue.fields });
+        return null;
+      });
+    }
+  }
+
+  return obj;
+}
+
+// Get default user preferences
+function getDefaultUserPreferences() {
+  return {
+    // UI Preferences
+    theme: 'light',
+    notifications: true,
+    autoSave: true,
+
+    // API Configuration
+    defaultModel: 'gemini-2.5-flash',
+    selectedModel: 'gemini-2.5-flash',
+    keyRotation: true,
+    maxContextLength: 1048576,
+
+    // Behavior Settings
+    restrictToFiverr: true,
+    sessionTimeout: 30 * 60 * 1000, // 30 minutes
+    maxSessions: 50,
+    conversationContext: true,
+
+    // User Profile Extensions
+    bio: '', // User's professional bio/description
+    language: 'en-US', // User's preferred language
+
+    // Advanced Settings
+    exportFormat: 'json',
+    streamingEnabled: true,
+    realTimeTyping: true,
+
+    // Privacy Settings
+    crossBrowserSync: true,
+    driveIntegration: true,
+    dataBackup: true,
+
+    // Performance Settings
+    maxCacheSize: 100, // MB
+    sessionHistoryLimit: 50,
+    messageHistoryLimit: 1000,
+    automaticCleanup: true
+  };
 }
 
 console.log('✅ Firebase Background: Service worker initialized successfully');

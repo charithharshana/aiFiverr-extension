@@ -422,9 +422,9 @@ class PopupManager {
       chrome.tabs.create({ url: 'mailto:contact@charithharshana.com' });
     });
 
-    document.getElementById('feedbackLink')?.addEventListener('click', (e) => {
+    document.getElementById('privacyLink')?.addEventListener('click', (e) => {
       e.preventDefault();
-      chrome.tabs.create({ url: 'https://www.youtube.com/@wcharithharshana' });
+      chrome.tabs.create({ url: 'https://www.charithharshana.com/aifiverr/privacy-policy' });
     });
 
     document.getElementById('aboutLink')?.addEventListener('click', (e) => {
@@ -5227,8 +5227,8 @@ class PopupManager {
     return {
       aiAssistant: {
         ctrl: true,
-        shift: true,
-        alt: false,
+        shift: false,
+        alt: true,
         key: 'A',
         description: 'Open AI assistance chat'
       },

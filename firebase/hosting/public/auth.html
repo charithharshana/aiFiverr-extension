@@ -161,18 +161,52 @@
             const accessToken = credential.accessToken;
 
             console.log('aiFiverr Firebase Web Auth: Sign in successful:', user.email);
+            console.log('aiFiverr Firebase Web Auth: Full result object:', {
+              user: user,
+              credential: credential,
+              additionalUserInfo: result.additionalUserInfo
+            });
             updateStatus('Sign in successful!', 'success');
 
-            // Send success response to parent
+            // Extract comprehensive user data including OAuth profile
+            const comprehensiveUserData = {
+              // Core Firebase user data
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              photoURL: user.photoURL,
+              emailVerified: user.emailVerified,
+              phoneNumber: user.phoneNumber,
+
+              // Account metadata
+              creationTime: user.metadata?.creationTime,
+              lastSignInTime: user.metadata?.lastSignInTime,
+
+              // Provider information
+              providerId: user.providerId,
+              providerData: user.providerData || [],
+
+              // Token information
+              refreshToken: user.refreshToken
+            };
+
+            // Extract additional OAuth profile data if available
+            let additionalUserInfo = null;
+            if (result.additionalUserInfo) {
+              additionalUserInfo = {
+                providerId: result.additionalUserInfo.providerId,
+                isNewUser: result.additionalUserInfo.isNewUser,
+                profile: result.additionalUserInfo.profile || {}
+              };
+
+              console.log('aiFiverr Firebase Web Auth: Additional user info:', additionalUserInfo);
+            }
+
+            // Send comprehensive response to parent
             sendResponseToParent({
               success: true,
-              user: {
-                uid: user.uid,
-                email: user.email,
-                displayName: user.displayName,
-                photoURL: user.photoURL,
-                emailVerified: user.emailVerified
-              },
+              user: comprehensiveUserData,
+              additionalUserInfo: additionalUserInfo,
               accessToken: accessToken,
               refreshToken: user.refreshToken
             });

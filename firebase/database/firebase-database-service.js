@@ -188,7 +188,7 @@ class FirebaseDatabaseService {
   }
 
   /**
-   * Add or update user data (replaces Google Sheets functionality)
+   * Add or update user data with enhanced preferences structure
    */
   async addUserData(userData) {
     try {
@@ -196,32 +196,59 @@ class FirebaseDatabaseService {
 
       // Check if user already exists
       const existingUser = await this.getUserData(userData.email);
-      
+
       const userDoc = {
+        // Core user information
         email: userData.email,
-        name: userData.name || '',
-        picture: userData.picture || '',
-        id: userData.id || '',
+        name: userData.name || userData.displayName || '',
+        picture: userData.picture || userData.photoURL || '',
+        id: userData.id || userData.uid || '',
         given_name: userData.given_name || '',
         family_name: userData.family_name || '',
         locale: userData.locale || 'en-US',
-        timestamp: userData.timestamp || new Date().toISOString(),
+
+        // Comprehensive authentication data
+        uid: userData.uid || userData.id,
+        emailVerified: userData.emailVerified || false,
+        phoneNumber: userData.phoneNumber || null,
+        displayName: userData.displayName || userData.name || '',
+        photoURL: userData.photoURL || userData.picture || '',
+
+        // Account metadata
+        creationTime: userData.creationTime || null,
+        lastSignInTime: userData.lastSignInTime || null,
+        authenticationMethod: userData.authenticationMethod || 'firebase',
+        lastAuthenticationTime: userData.lastAuthenticationTime || new Date().toISOString(),
+
+        // Provider information
+        providerId: userData.providerId || null,
+        providerData: userData.providerData || [],
+        providers: userData.providers || [],
+
+        // Additional OAuth profile data
+        profile: userData.profile || null,
+        verified_email: userData.verified_email || null,
+        hd: userData.hd || null, // Google Workspace domain
+
+        // System fields
+        created: userData.timestamp || new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
         status: 'active',
-        lastLogin: new Date().toISOString()
+        preferences: this.getDefaultUserPreferences()
       };
 
-      // If user exists, update lastLogin; otherwise create new user
+      // If user exists, preserve existing preferences and update lastLogin
       if (existingUser) {
-        userDoc.firstLogin = existingUser.timestamp;
+        userDoc.created = existingUser.created || existingUser.timestamp;
+        userDoc.preferences = { ...this.getDefaultUserPreferences(), ...existingUser.preferences };
         console.log('aiFiverr Firebase DB: Updating existing user');
       } else {
-        userDoc.firstLogin = userDoc.timestamp;
         console.log('aiFiverr Firebase DB: Creating new user');
       }
 
       // Use email as document ID (replace special characters)
       const docId = userData.email.replace(/[^a-zA-Z0-9]/g, '_');
-      
+
       const firestoreDoc = {
         fields: this.toFirestoreDocument(userDoc)
       };
@@ -241,19 +268,70 @@ class FirebaseDatabaseService {
   }
 
   /**
+   * Get default user preferences structure
+   */
+  getDefaultUserPreferences() {
+    return {
+      // UI Preferences
+      theme: 'light',
+      notifications: true,
+      autoSave: true,
+
+      // API Configuration
+      defaultModel: 'gemini-2.5-flash',
+      selectedModel: 'gemini-2.5-flash',
+      keyRotation: true,
+      maxContextLength: 1048576,
+
+      // Behavior Settings
+      restrictToFiverr: true,
+      sessionTimeout: 30 * 60 * 1000, // 30 minutes
+      maxSessions: 50,
+      conversationContext: true,
+
+      // User Profile Extensions
+      bio: '', // User's professional bio/description
+      language: 'en-US', // User's preferred language
+
+      // Advanced Settings
+      exportFormat: 'json',
+      streamingEnabled: true,
+      realTimeTyping: true,
+
+      // Privacy Settings
+      crossBrowserSync: true,
+      driveIntegration: true,
+      dataBackup: true,
+
+      // Performance Settings
+      maxCacheSize: 100, // MB
+      sessionHistoryLimit: 50,
+      messageHistoryLimit: 1000,
+      automaticCleanup: true
+    };
+  }
+
+  /**
    * Get user data by email
    */
   async getUserData(userEmail) {
     try {
       const docId = userEmail.replace(/[^a-zA-Z0-9]/g, '_');
-      
+
       const response = await this.makeFirestoreRequest(`/${this.collections.users}/${docId}`);
-      
+
       if (response.error && response.error.code === 'NOT_FOUND') {
         return null;
       }
 
-      return this.fromFirestoreDocument(response);
+      const userData = this.fromFirestoreDocument(response);
+
+      // Ensure preferences exist with defaults
+      if (userData && !userData.preferences) {
+        userData.preferences = this.getDefaultUserPreferences();
+      }
+
+      return userData;
 
     } catch (error) {
       if (error.message.includes('NOT_FOUND')) {
@@ -261,6 +339,73 @@ class FirebaseDatabaseService {
       }
       console.error('aiFiverr Firebase DB: Failed to get user data:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Update user preferences
+   */
+  async updateUserPreferences(userEmail, preferences) {
+    try {
+      console.log('aiFiverr Firebase DB: Updating preferences for:', userEmail);
+
+      // Get existing user data
+      const existingUser = await this.getUserData(userEmail);
+      if (!existingUser) {
+        throw new Error('User not found');
+      }
+
+      // Merge with existing preferences
+      const updatedPreferences = {
+        ...this.getDefaultUserPreferences(),
+        ...existingUser.preferences,
+        ...preferences
+      };
+
+      const docId = userEmail.replace(/[^a-zA-Z0-9]/g, '_');
+
+      const updateDoc = {
+        fields: {
+          preferences: {
+            mapValue: {
+              fields: this.toFirestoreDocument(updatedPreferences).mapValue.fields
+            }
+          },
+          lastLogin: {
+            timestampValue: new Date().toISOString()
+          }
+        }
+      };
+
+      await this.makeFirestoreRequest(`/${this.collections.users}/${docId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updateDoc)
+      });
+
+      console.log('aiFiverr Firebase DB: User preferences updated successfully');
+      return { success: true, preferences: updatedPreferences };
+
+    } catch (error) {
+      console.error('aiFiverr Firebase DB: Failed to update user preferences:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user preferences only
+   */
+  async getUserPreferences(userEmail) {
+    try {
+      const userData = await this.getUserData(userEmail);
+      if (!userData) {
+        return this.getDefaultUserPreferences();
+      }
+
+      return { ...this.getDefaultUserPreferences(), ...userData.preferences };
+
+    } catch (error) {
+      console.error('aiFiverr Firebase DB: Failed to get user preferences:', error);
+      return this.getDefaultUserPreferences();
     }
   }
 

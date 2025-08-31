@@ -224,6 +224,9 @@ class TextSelector {
       console.log('aiFiverr: First selection added to conversation');
     }
 
+    // Update badge counter for each selection (including first and subsequent)
+    this.updateSelectionBadge();
+
     this.currentSelection = selection;
 
     // Preserve selection and range for later restoration
@@ -729,6 +732,9 @@ class TextSelector {
     this.preservedSelection = null;
     this.preservedRange = null;
 
+    // Reset badge counter when floating icon is closed
+    this.resetSelectionBadge();
+
     // Reset interaction flag
     this.isInteractingWithUI = false;
   }
@@ -769,6 +775,9 @@ class TextSelector {
     this.lastProcessedContext = null;
     this.lastUsedVariables = null;
     this.lastKnowledgeBaseFiles = null;
+
+    // Reset badge counter
+    this.resetSelectionBadge();
 
     // Update the UI to reflect the cleared state
     if (this.contextMenu) {
@@ -1195,27 +1204,46 @@ class TextSelector {
     newSessionBtn.innerHTML = '🔄';
     newSessionBtn.title = 'New Session - Clear both {conversation} and {reply} variables to start fresh';
     newSessionBtn.style.cssText = `
-      background: #f3f4f6;
-      border: 1px solid #d1d5db;
-      border-radius: 4px;
-      padding: 4px 6px;
-      font-size: 12px;
-      color: #374151;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 14px;
+      color: #495057;
       cursor: pointer;
-      transition: background-color 0.2s;
-      min-width: 24px;
-      height: 24px;
+      transition: all 0.2s ease;
+      min-width: 28px;
+      height: 28px;
       display: flex;
       align-items: center;
       justify-content: center;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      margin: 0;
+      outline: none;
     `;
 
     newSessionBtn.addEventListener('mouseenter', () => {
-      newSessionBtn.style.background = '#e5e7eb';
+      newSessionBtn.style.background = '#e9ecef';
+      newSessionBtn.style.borderColor = '#ced4da';
+      newSessionBtn.style.transform = 'translateY(-1px)';
+      newSessionBtn.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
     });
 
     newSessionBtn.addEventListener('mouseleave', () => {
-      newSessionBtn.style.background = '#f3f4f6';
+      newSessionBtn.style.background = '#f8f9fa';
+      newSessionBtn.style.borderColor = '#dee2e6';
+      newSessionBtn.style.transform = 'translateY(0)';
+      newSessionBtn.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.05)';
+    });
+
+    newSessionBtn.addEventListener('mousedown', () => {
+      newSessionBtn.style.transform = 'translateY(0)';
+      newSessionBtn.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.1)';
+    });
+
+    newSessionBtn.addEventListener('mouseup', () => {
+      newSessionBtn.style.transform = 'translateY(-1px)';
+      newSessionBtn.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
     });
 
     newSessionBtn.addEventListener('click', (e) => {
@@ -3333,6 +3361,46 @@ class TextSelector {
     } catch (error) {
       console.error('aiFiverr: Error initializing streaming chatbox:', error);
       return false; // Failure
+    }
+  }
+
+  /**
+   * Update selection badge counter
+   */
+  async updateSelectionBadge() {
+    try {
+      // Send message to background script to increment counter
+      if (typeof chrome !== 'undefined' && chrome.runtime) {
+        chrome.runtime.sendMessage({
+          type: 'INCREMENT_SELECTION_COUNTER'
+        }, (response) => {
+          if (response && response.success) {
+            console.log('aiFiverr: Selection badge counter updated to:', response.counter);
+          }
+        });
+      }
+    } catch (error) {
+      console.error('aiFiverr: Error updating selection badge:', error);
+    }
+  }
+
+  /**
+   * Reset selection badge counter
+   */
+  async resetSelectionBadge() {
+    try {
+      // Send message to background script to reset counter
+      if (typeof chrome !== 'undefined' && chrome.runtime) {
+        chrome.runtime.sendMessage({
+          type: 'RESET_SELECTION_COUNTER'
+        }, (response) => {
+          if (response && response.success) {
+            console.log('aiFiverr: Selection badge counter reset to:', response.counter);
+          }
+        });
+      }
+    } catch (error) {
+      console.error('aiFiverr: Error resetting selection badge:', error);
     }
   }
 }

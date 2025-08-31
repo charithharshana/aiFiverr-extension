@@ -323,8 +323,8 @@ class StorageManager {
       keyboardShortcuts: {
         aiAssistant: {
           ctrl: true,
-          shift: true,
-          alt: false,
+          shift: false,
+          alt: true,
           key: 'A',
           description: 'Open AI assistance chat'
         },

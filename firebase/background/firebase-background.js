@@ -14,6 +14,9 @@ let authState = {
   tokenExpiry: null
 };
 
+// Selection counter state for badge
+let selectionCounter = 0;
+
 // Load stored authentication state
 async function loadAuthState() {
   try {
@@ -67,34 +70,65 @@ async function createOffscreenDocument() {
 async function sendMessageToOffscreen(message) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error('Offscreen document timeout'));
-    }, 30000); // 30 second timeout
+      reject(new Error('Offscreen document timeout after 30 seconds'));
+    }, 30000);
 
-    // Create a unique message ID for tracking
-    const messageId = Date.now() + Math.random();
-    const messageWithId = { ...message, messageId, target: 'offscreen' };
+    try {
+      // Send message directly to offscreen document using chrome.runtime.sendMessage
+      // The offscreen document will handle the message and respond via sendResponse
+      chrome.runtime.sendMessage(
+        { ...message, target: 'offscreen' },
+        (response) => {
+          clearTimeout(timeout);
 
-    // Set up a one-time listener for the response
-    const responseListener = (responseMessage, sender, sendResponse) => {
-      if (responseMessage.responseToMessageId === messageId) {
-        chrome.runtime.onMessage.removeListener(responseListener);
-        clearTimeout(timeout);
-        resolve(responseMessage);
-      }
-    };
+          if (chrome.runtime.lastError) {
+            console.error('aiFiverr Background: Offscreen message error:', chrome.runtime.lastError.message);
+            reject(new Error(`Offscreen communication failed: ${chrome.runtime.lastError.message}`));
+            return;
+          }
 
-    chrome.runtime.onMessage.addListener(responseListener);
+          if (!response) {
+            reject(new Error('No response received from offscreen document'));
+            return;
+          }
 
-    // Send message to offscreen document
-    chrome.runtime.sendMessage(messageWithId, (response) => {
-      if (chrome.runtime.lastError) {
-        chrome.runtime.onMessage.removeListener(responseListener);
-        clearTimeout(timeout);
-        reject(new Error(chrome.runtime.lastError.message));
-      }
-      // Don't resolve here - wait for the proper response with messageId
-    });
+          console.log('aiFiverr Background: Received offscreen response:', response);
+          resolve(response);
+        }
+      );
+    } catch (error) {
+      clearTimeout(timeout);
+      reject(error);
+    }
   });
+}
+
+// Badge management functions
+async function updateBadge() {
+  try {
+    if (selectionCounter > 0) {
+      await chrome.action.setBadgeText({ text: selectionCounter.toString() });
+      await chrome.action.setBadgeBackgroundColor({ color: '#1dbf73' }); // Fiverr green
+      console.log('🔢 Firebase Background: Badge updated to:', selectionCounter);
+    } else {
+      await chrome.action.setBadgeText({ text: '' });
+      console.log('🔢 Firebase Background: Badge cleared');
+    }
+  } catch (error) {
+    console.error('❌ Firebase Background: Error updating badge:', error);
+  }
+}
+
+async function incrementSelectionCounter() {
+  selectionCounter++;
+  await updateBadge();
+  console.log('➕ Firebase Background: Selection counter incremented to:', selectionCounter);
+}
+
+async function resetSelectionCounter() {
+  selectionCounter = 0;
+  await updateBadge();
+  console.log('🔄 Firebase Background: Selection counter reset');
 }
 
 // Initialize
@@ -210,6 +244,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       handleGetApiKey(sendResponse);
       return true; // Async response
 
+    case 'INCREMENT_SELECTION_COUNTER':
+      console.log('➕ Firebase Background: Incrementing selection counter');
+      incrementSelectionCounter();
+      sendResponse({ success: true, counter: selectionCounter });
+      return false; // Sync response
+
+    case 'RESET_SELECTION_COUNTER':
+      console.log('🔄 Firebase Background: Resetting selection counter');
+      resetSelectionCounter();
+      sendResponse({ success: true, counter: selectionCounter });
+      return false; // Sync response
+
+    case 'GET_SELECTION_COUNTER':
+      console.log('🔢 Firebase Background: Getting selection counter');
+      sendResponse({ success: true, counter: selectionCounter });
+      return false; // Sync response
+
     default:
       console.log('❓ Firebase Background: Unknown message type:', message.type);
       sendResponse({ success: false, error: 'Unknown message type: ' + message.type });
@@ -225,10 +276,38 @@ async function handleFirebaseAuthStart(sendResponse) {
     // Create offscreen document for Firebase authentication
     await createOffscreenDocument();
 
-    // Send authentication request to offscreen document
-    const authResult = await sendMessageToOffscreen({
-      action: 'firebase-auth'
-    });
+    // Add a small delay to ensure offscreen document is fully loaded
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Send authentication request to offscreen document with retry logic
+    let authResult = null;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`🔐 Firebase Background: Authentication attempt ${attempt}/3`);
+
+        authResult = await sendMessageToOffscreen({
+          action: 'firebase-auth'
+        });
+
+        if (authResult && authResult.success) {
+          break; // Success, exit retry loop
+        } else {
+          lastError = new Error(authResult?.error || 'Authentication failed');
+          if (attempt < 3) {
+            console.warn(`⚠️ Firebase Background: Auth attempt ${attempt} failed, retrying...`, lastError.message);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+          }
+        }
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) {
+          console.warn(`⚠️ Firebase Background: Auth attempt ${attempt} failed with error, retrying...`, error.message);
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        }
+      }
+    }
 
     if (authResult && authResult.success) {
       // Update auth state with real Firebase data
@@ -242,15 +321,17 @@ async function handleFirebaseAuthStart(sendResponse) {
       await saveAuthState();
 
       console.log('✅ Firebase Background: Authentication successful for:', authResult.user.email);
+      console.log('✅ Firebase Background: Additional user info available:', !!authResult.additionalUserInfo);
 
       sendResponse({
         success: true,
         user: authResult.user,
+        additionalUserInfo: authResult.additionalUserInfo,
         accessToken: authResult.accessToken,
         refreshToken: authResult.refreshToken
       });
     } else {
-      throw new Error(authResult?.error || 'Authentication failed');
+      throw lastError || new Error('Authentication failed after 3 attempts');
     }
 
   } catch (error) {

@@ -133,31 +133,34 @@ class FirebaseAuthService {
       }, 3);
 
       if (response && response.success) {
-        // Update local state with Firebase authentication data
+        // Update local state with comprehensive Firebase authentication data
         this.firebaseUser = response.user;
-        this.userInfo = {
-          email: response.user.email,
-          name: response.user.displayName,
-          picture: response.user.photoURL,
-          id: response.user.uid,
-          given_name: response.user.displayName?.split(' ')[0] || '',
-          family_name: response.user.displayName?.split(' ').slice(1).join(' ') || '',
-          locale: 'en-US' // Default locale
-        };
+        this.userInfo = this.extractComprehensiveUserData(response.user, response.additionalUserInfo);
         this.accessToken = response.accessToken;
         this.refreshToken = response.refreshToken;
         this.tokenExpiry = Date.now() + (3600 * 1000); // 1 hour from now
         this.isAuthenticated = true;
 
+        console.log('aiFiverr Firebase Auth: Extracted comprehensive user data:', {
+          email: this.userInfo.email,
+          displayName: this.userInfo.displayName,
+          emailVerified: this.userInfo.emailVerified,
+          hasProfile: !!this.userInfo.profile,
+          hasProviders: !!this.userInfo.providers,
+          locale: this.userInfo.locale,
+          givenName: this.userInfo.given_name,
+          familyName: this.userInfo.family_name
+        });
+
         // Save authentication data
         await this.saveAuth();
 
-        // Collect user data (same as before)
-        await this.collectUserData();
+        // Collect comprehensive user data for Firebase storage
+        await this.collectComprehensiveUserData();
 
         this.notifyAuthListeners();
 
-        console.log('aiFiverr Firebase Auth: Authentication successful');
+        console.log('aiFiverr Firebase Auth: Authentication successful with comprehensive data');
         return {
           success: true,
           user: this.userInfo
@@ -321,40 +324,122 @@ class FirebaseAuthService {
   }
 
   /**
-   * Collect user data and store in Firebase (replaces Google Sheets)
+   * Extract comprehensive user data from Firebase authentication response
    */
-  async collectUserData() {
-    if (!this.userInfo) {
+  extractComprehensiveUserData(firebaseUser, additionalUserInfo = null) {
+    console.log('aiFiverr Firebase Auth: Extracting comprehensive user data');
+
+    // Base user data from Firebase User object
+    const userData = {
+      // Core identification
+      uid: firebaseUser.uid,
+      email: firebaseUser.email,
+      emailVerified: firebaseUser.emailVerified,
+
+      // Display information
+      displayName: firebaseUser.displayName,
+      photoURL: firebaseUser.photoURL,
+
+      // Phone information
+      phoneNumber: firebaseUser.phoneNumber,
+
+      // Account metadata
+      creationTime: firebaseUser.metadata?.creationTime,
+      lastSignInTime: firebaseUser.metadata?.lastSignInTime,
+
+      // Provider information
+      providerId: firebaseUser.providerId,
+      providerData: firebaseUser.providerData || [],
+
+      // Derived fields for compatibility
+      id: firebaseUser.uid,
+      name: firebaseUser.displayName || '',
+      picture: firebaseUser.photoURL || '',
+      given_name: '',
+      family_name: '',
+      locale: 'en-US'
+    };
+
+    // Parse display name into given_name and family_name
+    if (firebaseUser.displayName) {
+      const nameParts = firebaseUser.displayName.trim().split(' ');
+      userData.given_name = nameParts[0] || '';
+      userData.family_name = nameParts.slice(1).join(' ') || '';
+    }
+
+    // Extract additional OAuth provider data if available
+    if (additionalUserInfo && additionalUserInfo.profile) {
+      const profile = additionalUserInfo.profile;
+
+      // Google OAuth specific fields
+      if (additionalUserInfo.providerId === 'google.com') {
+        userData.locale = profile.locale || userData.locale;
+        userData.given_name = profile.given_name || userData.given_name;
+        userData.family_name = profile.family_name || userData.family_name;
+        userData.verified_email = profile.verified_email;
+        userData.hd = profile.hd; // Hosted domain for G Suite accounts
+      }
+
+      // Additional profile fields that might be available
+      userData.profile = {
+        ...profile,
+        provider: additionalUserInfo.providerId
+      };
+    }
+
+    // Extract provider-specific data
+    if (firebaseUser.providerData && firebaseUser.providerData.length > 0) {
+      userData.providers = firebaseUser.providerData.map(provider => ({
+        providerId: provider.providerId,
+        uid: provider.uid,
+        displayName: provider.displayName,
+        email: provider.email,
+        phoneNumber: provider.phoneNumber,
+        photoURL: provider.photoURL
+      }));
+    }
+
+    console.log('aiFiverr Firebase Auth: Comprehensive user data extracted:', {
+      email: userData.email,
+      displayName: userData.displayName,
+      emailVerified: userData.emailVerified,
+      providersCount: userData.providers?.length || 0
+    });
+
+    return userData;
+  }
+
+  /**
+   * Collect comprehensive user data for Firebase storage
+   */
+  async collectComprehensiveUserData() {
+    if (!this.userInfo || !this.userInfo.email) {
       console.warn('aiFiverr Firebase Auth: No user info available for data collection');
       return;
     }
 
     try {
-      console.log('aiFiverr Firebase Auth: Collecting user data for:', this.userInfo.email);
+      console.log('aiFiverr Firebase Auth: Collecting comprehensive user data for:', this.userInfo.email);
 
-      // Send user data to background script for Firebase storage
+      // Send comprehensive user data to background script for Firebase storage
       const response = await chrome.runtime.sendMessage({
         type: 'FIREBASE_STORE_USER_DATA',
         userData: {
-          email: this.userInfo.email,
-          name: this.userInfo.name,
-          picture: this.userInfo.picture,
-          id: this.userInfo.id,
-          given_name: this.userInfo.given_name,
-          family_name: this.userInfo.family_name,
-          locale: this.userInfo.locale,
-          timestamp: new Date().toISOString()
+          ...this.userInfo,
+          timestamp: new Date().toISOString(),
+          authenticationMethod: 'firebase',
+          lastAuthenticationTime: new Date().toISOString()
         }
       });
 
       if (!response?.success) {
-        console.warn('aiFiverr Firebase Auth: Failed to store user data:', response?.error);
+        console.warn('aiFiverr Firebase Auth: Failed to store comprehensive user data:', response?.error);
       } else {
-        console.log('aiFiverr Firebase Auth: User data stored in Firebase');
+        console.log('aiFiverr Firebase Auth: Comprehensive user data stored in Firebase');
       }
 
     } catch (error) {
-      console.warn('aiFiverr Firebase Auth: Failed to collect user data:', error);
+      console.error('aiFiverr Firebase Auth: Error collecting comprehensive user data:', error);
     }
   }
 

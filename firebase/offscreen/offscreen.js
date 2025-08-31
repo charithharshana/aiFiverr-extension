@@ -47,26 +47,25 @@ function handleExtensionMessage(message, sender, sendResponse) {
     return false;
   }
 
-  // Create a response function that includes the message ID
-  const responseWithId = (response) => {
-    const responseMessage = {
-      ...response,
-      responseToMessageId: message.messageId
-    };
-
-    // Send response back to background script
-    chrome.runtime.sendMessage(responseMessage);
-  };
-
-  if (message.action === 'firebase-auth') {
-    handleFirebaseAuth(responseWithId);
-    return true; // Indicates async response
-  } else if (message.action === 'firebase-signout') {
-    handleFirebaseSignOut(responseWithId);
-    return true;
+  try {
+    if (message.action === 'firebase-auth') {
+      console.log('aiFiverr Offscreen: Handling Firebase auth request');
+      handleFirebaseAuth(sendResponse);
+      return true; // Indicates async response
+    } else if (message.action === 'firebase-signout') {
+      console.log('aiFiverr Offscreen: Handling Firebase signout request');
+      handleFirebaseSignOut(sendResponse);
+      return true; // Indicates async response
+    } else {
+      console.warn('aiFiverr Offscreen: Unknown action:', message.action);
+      sendResponse({ success: false, error: 'Unknown action: ' + message.action });
+      return false;
+    }
+  } catch (error) {
+    console.error('aiFiverr Offscreen: Error handling message:', error);
+    sendResponse({ success: false, error: error.message });
+    return false;
   }
-
-  return false;
 }
 
 /**
@@ -99,12 +98,17 @@ function handleFirebaseAuth(sendResponse) {
 
       if (data.success) {
         console.log('aiFiverr Offscreen: Authentication successful');
+        console.log('aiFiverr Offscreen: Received comprehensive user data:', {
+          user: data.user,
+          additionalUserInfo: data.additionalUserInfo
+        });
         updateStatus('Authentication successful!', 'success');
-        
-        // Send success response back to extension
+
+        // Send comprehensive response back to extension
         sendResponse({
           success: true,
           user: data.user,
+          additionalUserInfo: data.additionalUserInfo,
           accessToken: data.accessToken,
           refreshToken: data.refreshToken
         });
