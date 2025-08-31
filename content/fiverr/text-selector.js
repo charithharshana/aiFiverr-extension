@@ -1187,18 +1187,24 @@ class TextSelector {
 
     // Header with session management
     const header = document.createElement('div');
-    header.style.cssText = 'font-weight: 600; font-size: 12px; color: #374151; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;';
+    header.style.cssText = 'font-weight: 600; font-size: 12px; color: #374151; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; flex-wrap: nowrap;';
 
     const leftSection = document.createElement('div');
-    leftSection.style.cssText = 'display: flex; align-items: center; gap: 8px;';
-    leftSection.innerHTML = `
-      <span>Reply Text ({reply} variable)</span>
-      <span style="font-size: 10px; color: #6b7280; font-weight: normal;">Optional</span>
-    `;
+    leftSection.style.cssText = 'display: flex; align-items: center; justify-content: flex-start;';
+
+    const mainSpan = document.createElement('span');
+    mainSpan.textContent = 'Reply Text ({reply} variable)';
+
+    const optionalSpan = document.createElement('span');
+    optionalSpan.textContent = 'Optional';
+    optionalSpan.style.cssText = 'font-size: 10px; color: #6b7280; font-weight: normal; margin-left: 8px;';
+
+    leftSection.appendChild(mainSpan);
+    leftSection.appendChild(optionalSpan);
 
     // FEATURE 3: Session management - New Session button
     const rightSection = document.createElement('div');
-    rightSection.style.cssText = 'display: flex; align-items: center; gap: 4px;';
+    rightSection.style.cssText = 'display: flex; align-items: center; gap: 4px; margin-left: 8px;';
 
     const newSessionBtn = document.createElement('button');
     newSessionBtn.innerHTML = '🔄';
