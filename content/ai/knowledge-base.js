@@ -20,10 +20,11 @@ class KnowledgeBaseManager {
     await this.loadKnowledgeBase();
     await this.loadCustomPrompts();
     await this.loadTemplates();
-    await this.loadKnowledgeBaseFiles();
 
-    // Only initialize file lifecycle manager and sync if authenticated
+    // Only load knowledge base files if authenticated to prevent errors on fresh install
     if (this.isUserAuthenticated()) {
+      await this.loadKnowledgeBaseFiles();
+
       // Initialize comprehensive file lifecycle manager
       await this.initializeFileLifecycleManager();
 
