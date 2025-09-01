@@ -570,11 +570,16 @@ class FiverrInjector {
       // Clear existing content
       dropdown.innerHTML = '';
 
-      // Get ONLY custom prompts for Fiverr chat - no default prompts
+      // Get ALL prompts (default + custom) - always show all available prompts
       let allPrompts = {};
+
+      // Load default prompts
+      const defaultPrompts = this.getDefaultPrompts();
+      allPrompts = { ...defaultPrompts };
 
       // Load custom prompts from storage with enhanced error handling
       let customPrompts = {};
+      let defaultPromptVisibility = {};
 
       try {
         const customPromptsResult = await chrome.storage.local.get('customPrompts');
@@ -587,7 +592,7 @@ class FiverrInjector {
         const visibilityResult = await chrome.storage.local.get('floatingIconVisibility');
         const floatingIconVisibility = visibilityResult.floatingIconVisibility || {};
 
-        // Filter custom prompts based on floating icon visibility settings
+        // Only show custom prompts (no default prompts) - same as floating message implementation
         const visibleCustomPrompts = {};
         Object.entries(customPrompts).forEach(([key, prompt]) => {
           // Default to visible if not explicitly set to false
@@ -596,8 +601,8 @@ class FiverrInjector {
           }
         });
 
-        // Use ONLY custom prompts for Fiverr chat (no default prompts)
-        allPrompts = { ...visibleCustomPrompts };
+        // Use only custom prompts (no default prompts)
+        allPrompts = visibleCustomPrompts;
 
         console.log('aiFiverr: Loaded custom prompts for Fiverr chat dropdown:', {
           customTotal: Object.keys(customPrompts).length,
@@ -607,11 +612,10 @@ class FiverrInjector {
         });
       } catch (error) {
         console.warn('aiFiverr: Failed to load custom prompts:', error);
-        allPrompts = {}; // No fallback to defaults
       }
 
       if (!allPrompts || Object.keys(allPrompts).length === 0) {
-        dropdown.innerHTML = '<div style="padding: 12px; color: #6b7280;">No custom prompts available. Create custom prompts in Settings.</div>';
+        dropdown.innerHTML = '<div style="padding: 12px; color: #6b7280;">No custom prompts available</div>';
         return;
       }
 
@@ -765,7 +769,57 @@ class FiverrInjector {
     }
   }
 
-  // getDefaultPrompts method removed - Fiverr chat now uses only custom prompts
+  /**
+   * Get default prompts
+   */
+  getDefaultPrompts() {
+    // Use centralized prompt manager if available
+    if (window.promptManager && window.promptManager.initialized) {
+      return window.promptManager.getAllPrompts();
+    }
+
+    // Use knowledge base manager as fallback
+    if (window.knowledgeBaseManager) {
+      const allPrompts = window.knowledgeBaseManager.getAllPrompts();
+      if (Object.keys(allPrompts).length > 0) {
+        return allPrompts;
+      }
+    }
+
+    // Final fallback prompts
+    return {
+      'summary': {
+        name: 'Summary',
+        title: 'Summary',
+        description: 'Summarize the conversation and extract key details like budget, timeline, and next steps'
+      },
+      'follow_up': {
+        name: 'Follow-up',
+        title: 'Follow-up',
+        description: 'Write a friendly and professional follow-up message based on conversation'
+      },
+      'proposal': {
+        name: 'Proposal',
+        title: 'Proposal',
+        description: 'Create a Fiverr project proposal based on the conversation'
+      },
+      'translate': {
+        name: 'Translate',
+        title: 'Translate',
+        description: 'Translate conversation into specified language'
+      },
+      'improve_translate': {
+        name: 'Improve & Translate',
+        title: 'Improve & Translate',
+        description: 'Improve grammar and tone, then translate to English'
+      },
+      'improve': {
+        name: 'Improve',
+        title: 'Improve',
+        description: 'Improve message grammar, clarity and professionalism'
+      }
+    };
+  }
 
   /**
    * Execute selected prompt
