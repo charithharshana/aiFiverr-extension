@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Attachment Debug</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .debug-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .debug-button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .debug-button:hover {
+            background: #2980b9;
+        }
+        .debug-result {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+        }
+        .success {
+            background: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>File Attachment Debug Tool</h1>
+    <p>Quick debug tool to check if files are being attached to prompts properly.</p>
+
+    <div class="debug-container">
+        <h3>Check Proposal Prompt Files</h3>
+        <button class="debug-button" onclick="checkProposalPrompt()">Check Proposal Prompt</button>
+        <div id="proposal-result" class="debug-result"></div>
+    </div>
+
+    <div class="debug-container">
+        <h3>Check All Custom Prompts</h3>
+        <button class="debug-button" onclick="checkAllPrompts()">Check All Custom Prompts</button>
+        <div id="all-prompts-result" class="debug-result"></div>
+    </div>
+
+    <div class="debug-container">
+        <h3>Test Knowledge Base Manager</h3>
+        <button class="debug-button" onclick="testKnowledgeBaseManager()">Test KB Manager</button>
+        <div id="kb-manager-result" class="debug-result"></div>
+    </div>
+
+    <script>
+        async function checkProposalPrompt() {
+            const resultDiv = document.getElementById('proposal-result');
+            resultDiv.textContent = 'Checking proposal prompt...';
+            
+            try {
+                // Get custom prompts from storage
+                const result = await chrome.storage.local.get('customPrompts');
+                const customPrompts = result.customPrompts || {};
+                
+                const proposalPrompt = customPrompts['proposal'];
+                
+                if (!proposalPrompt) {
+                    resultDiv.className = 'debug-result error';
+                    resultDiv.textContent = '❌ No "proposal" prompt found in custom prompts.\n\nAvailable prompts:\n' + 
+                        Object.keys(customPrompts).join('\n');
+                    return;
+                }
+                
+                let output = '✅ Proposal prompt found!\n\n';
+                output += `Name: ${proposalPrompt.name}\n`;
+                output += `Description: ${proposalPrompt.description || 'No description'}\n`;
+                output += `Prompt text: ${proposalPrompt.prompt.substring(0, 100)}...\n\n`;
+                
+                if (proposalPrompt.knowledgeBaseFiles && proposalPrompt.knowledgeBaseFiles.length > 0) {
+                    output += `✅ Files attached: ${proposalPrompt.knowledgeBaseFiles.length}\n\n`;
+                    
+                    proposalPrompt.knowledgeBaseFiles.forEach((file, index) => {
+                        output += `File ${index + 1}:\n`;
+                        output += `  Name: ${file.name}\n`;
+                        output += `  ID: ${file.id || file.driveFileId || 'Missing'}\n`;
+                        output += `  Has geminiUri: ${file.geminiUri ? '✅ YES' : '❌ NO'}\n`;
+                        output += `  Has mimeType: ${file.mimeType ? '✅ YES' : '❌ NO'}\n`;
+                        if (file.geminiUri) {
+                            output += `  Gemini URI: ${file.geminiUri.substring(0, 50)}...\n`;
+                        }
+                        if (file.mimeType) {
+                            output += `  MIME Type: ${file.mimeType}\n`;
+                        }
+                        output += `\n`;
+                    });
+                    
+                    const readyFiles = proposalPrompt.knowledgeBaseFiles.filter(f => f.geminiUri);
+                    if (readyFiles.length === proposalPrompt.knowledgeBaseFiles.length) {
+                        output += `🎉 All files are ready for API calls!`;
+                        resultDiv.className = 'debug-result success';
+                    } else {
+                        output += `⚠️ ${readyFiles.length}/${proposalPrompt.knowledgeBaseFiles.length} files are ready for API calls.`;
+                        resultDiv.className = 'debug-result error';
+                    }
+                } else {
+                    output += '❌ No files attached to proposal prompt.';
+                    resultDiv.className = 'debug-result error';
+                }
+                
+                resultDiv.textContent = output;
+                
+            } catch (error) {
+                resultDiv.className = 'debug-result error';
+                resultDiv.textContent = `❌ Error: ${error.message}`;
+            }
+        }
+
+        async function checkAllPrompts() {
+            const resultDiv = document.getElementById('all-prompts-result');
+            resultDiv.textContent = 'Checking all custom prompts...';
+            
+            try {
+                const result = await chrome.storage.local.get('customPrompts');
+                const customPrompts = result.customPrompts || {};
+                
+                let output = `📊 Custom Prompts Summary:\n`;
+                output += `Total prompts: ${Object.keys(customPrompts).length}\n\n`;
+                
+                let promptsWithFiles = 0;
+                let promptsWithReadyFiles = 0;
+                
+                for (const [key, prompt] of Object.entries(customPrompts)) {
+                    if (prompt.knowledgeBaseFiles && prompt.knowledgeBaseFiles.length > 0) {
+                        promptsWithFiles++;
+                        
+                        const readyFiles = prompt.knowledgeBaseFiles.filter(f => f.geminiUri);
+                        if (readyFiles.length > 0) {
+                            promptsWithReadyFiles++;
+                        }
+                        
+                        output += `📝 ${prompt.name} (${key}):\n`;
+                        output += `  Files: ${prompt.knowledgeBaseFiles.length}, Ready: ${readyFiles.length}\n`;
+                        
+                        prompt.knowledgeBaseFiles.forEach(file => {
+                            const status = file.geminiUri ? '✅' : '❌';
+                            output += `  ${status} ${file.name}\n`;
+                        });
+                        output += `\n`;
+                    }
+                }
+                
+                output += `\nSummary:\n`;
+                output += `Prompts with files: ${promptsWithFiles}\n`;
+                output += `Prompts with API-ready files: ${promptsWithReadyFiles}\n`;
+                
+                if (promptsWithFiles === 0) {
+                    output += `\n❌ No prompts have attached files.`;
+                    resultDiv.className = 'debug-result error';
+                } else if (promptsWithReadyFiles === promptsWithFiles) {
+                    output += `\n🎉 All prompts with files are ready for API calls!`;
+                    resultDiv.className = 'debug-result success';
+                } else {
+                    output += `\n⚠️ Some prompts have files that are not ready for API calls.`;
+                    resultDiv.className = 'debug-result';
+                }
+                
+                resultDiv.textContent = output;
+                
+            } catch (error) {
+                resultDiv.className = 'debug-result error';
+                resultDiv.textContent = `❌ Error: ${error.message}`;
+            }
+        }
+
+        async function testKnowledgeBaseManager() {
+            const resultDiv = document.getElementById('kb-manager-result');
+            resultDiv.textContent = 'Testing knowledge base manager...';
+            
+            try {
+                if (!window.knowledgeBaseManager) {
+                    resultDiv.className = 'debug-result error';
+                    resultDiv.textContent = '❌ Knowledge base manager not available.\nMake sure you are on a Fiverr page with the extension loaded.';
+                    return;
+                }
+                
+                let output = '✅ Knowledge base manager available!\n\n';
+                
+                // Test getting the proposal prompt
+                try {
+                    const proposalPrompt = window.knowledgeBaseManager.getPrompt('proposal');
+                    if (proposalPrompt) {
+                        output += '✅ Can access proposal prompt via KB manager\n';
+                        output += `Files in prompt: ${proposalPrompt.knowledgeBaseFiles ? proposalPrompt.knowledgeBaseFiles.length : 0}\n\n`;
+                        
+                        // Test processing the prompt
+                        const processedResult = await window.knowledgeBaseManager.processPrompt('proposal', {
+                            conversation: 'Test conversation',
+                            username: 'TestUser'
+                        });
+                        
+                        output += '✅ Successfully processed proposal prompt\n';
+                        output += `Processed files: ${processedResult.knowledgeBaseFiles ? processedResult.knowledgeBaseFiles.length : 0}\n`;
+                        
+                        if (processedResult.knowledgeBaseFiles && processedResult.knowledgeBaseFiles.length > 0) {
+                            output += '\nProcessed files details:\n';
+                            processedResult.knowledgeBaseFiles.forEach(file => {
+                                output += `• ${file.name} - ${file.geminiUri ? 'Ready' : 'Not ready'}\n`;
+                            });
+                            
+                            resultDiv.className = 'debug-result success';
+                            output += '\n🎉 Files should now be included in API calls!';
+                        } else {
+                            resultDiv.className = 'debug-result error';
+                            output += '\n❌ No files were processed from the prompt.';
+                        }
+                    } else {
+                        output += '❌ Cannot access proposal prompt via KB manager\n';
+                        resultDiv.className = 'debug-result error';
+                    }
+                } catch (error) {
+                    output += `❌ Error processing prompt: ${error.message}\n`;
+                    resultDiv.className = 'debug-result error';
+                }
+                
+                resultDiv.textContent = output;
+                
+            } catch (error) {
+                resultDiv.className = 'debug-result error';
+                resultDiv.textContent = `❌ Error: ${error.message}`;
+            }
+        }
+
+        // Auto-run proposal check on page load
+        window.addEventListener('load', () => {
+            setTimeout(checkProposalPrompt, 1000);
+        });
+    </script>
+</body>
+</html>

@@ -1543,8 +1543,32 @@ class TextSelector {
 
         console.log('aiFiverr: Context variables available:', Object.keys(context));
 
-        // NEW APPROACH: Use variable processor for smart prompt processing
-        if (window.variableProcessor) {
+        // CRITICAL FIX: Use knowledge base manager for saved prompts to get attached files
+        // The variable processor doesn't know about files attached to saved prompts
+        if (window.knowledgeBaseManager && promptKey) {
+          console.log('aiFiverr: Using knowledge base manager for saved prompt processing');
+
+          // First get the prompt processing result from knowledge base manager
+          // This will include files that were attached to the saved prompt
+          result = await window.knowledgeBaseManager.processPrompt(promptKey, context);
+
+          // Store context for streaming chat consistency
+          this.lastProcessedContext = availableContext;
+          this.lastUsedVariables = Object.keys(context);
+          this.lastKnowledgeBaseFiles = result.knowledgeBaseFiles || [];
+          this.lastUsedPrompt = result.prompt;
+
+          console.log('aiFiverr: Knowledge base manager processing result:');
+          console.log('aiFiverr: Files from saved prompt:', (result.knowledgeBaseFiles || []).length);
+          console.log('aiFiverr: Files details:', (result.knowledgeBaseFiles || []).map(f => ({
+            name: f.name,
+            hasGeminiUri: !!f.geminiUri,
+            mimeType: f.mimeType
+          })));
+
+        } else if (window.variableProcessor) {
+          console.log('aiFiverr: Using variable processor for dynamic prompt processing');
+
           // Get manually attached files if any (from floating menu or other UI)
           const manuallyAttachedFiles = this.getManuallyAttachedFiles();
 
@@ -1562,16 +1586,19 @@ class TextSelector {
           this.lastProcessedContext = availableContext;
           this.lastUsedVariables = processedResult.usedVariables;
           this.lastKnowledgeBaseFiles = processedResult.knowledgeBaseFiles;
-          this.lastUsedPrompt = processedResult.prompt; // Store PROCESSED prompt that was actually sent to AI
+          this.lastUsedPrompt = processedResult.prompt;
 
-          console.log('aiFiverr: Using variable processor for smart prompt processing');
+          console.log('aiFiverr: Variable processor processing result:');
           console.log('aiFiverr: Variables used:', processedResult.usedVariables);
           console.log('aiFiverr: Files used:', processedResult.usedFiles);
           console.log('aiFiverr: Manually attached files:', manuallyAttachedFiles.length);
         } else {
-          // Fallback to knowledge base manager
-          result = await window.knowledgeBaseManager.processPrompt(promptKey, context);
-          console.log('aiFiverr: Using knowledge base manager for prompt processing');
+          // Final fallback
+          console.warn('aiFiverr: No prompt processing system available, using basic processing');
+          result = {
+            prompt: promptText,
+            knowledgeBaseFiles: []
+          };
         }
       } catch (processError) {
         console.error('aiFiverr: Error processing prompt:', processError);

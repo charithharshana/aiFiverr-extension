@@ -1558,12 +1558,27 @@ class FiverrInjector {
         reply: '' // No reply context in this flow
       };
 
-      // NEW APPROACH: Use variable processor for smart prompt processing
+      // CRITICAL FIX: Use knowledge base manager for saved prompts to get attached files
       let prompt;
       let knowledgeBaseFiles = [];
 
-      if (window.variableProcessor && promptText) {
-        // Use variable processor to get only required variables and files
+      if (window.knowledgeBaseManager && selectedPromptKey) {
+        // Use knowledge base manager for saved prompts to get attached files
+        console.log('aiFiverr Injector: Using knowledge base manager for saved prompt:', selectedPromptKey);
+        const processedResult = await window.knowledgeBaseManager.processPrompt(selectedPromptKey, availableContext);
+        prompt = processedResult.prompt;
+        knowledgeBaseFiles = processedResult.knowledgeBaseFiles || [];
+
+        console.log('aiFiverr Injector: Files from saved prompt:', knowledgeBaseFiles.length);
+        console.log('aiFiverr Injector: Files details:', knowledgeBaseFiles.map(f => ({
+          name: f.name,
+          hasGeminiUri: !!f.geminiUri,
+          mimeType: f.mimeType
+        })));
+
+      } else if (window.variableProcessor && promptText) {
+        // Use variable processor for dynamic prompts
+        console.log('aiFiverr Injector: Using variable processor for dynamic prompt processing');
         const processedResult = await window.variableProcessor.processPrompt(promptText, availableContext);
         prompt = processedResult.prompt;
         knowledgeBaseFiles = processedResult.knowledgeBaseFiles || [];
