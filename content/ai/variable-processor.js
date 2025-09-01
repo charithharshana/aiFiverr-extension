@@ -131,6 +131,23 @@ class VariableProcessor {
         if (attachedFile && attachedFile.geminiUri) {
           requiredFiles.push(attachedFile);
           console.log(`aiFiverr Variable Processor: Including manually attached file: ${attachedFile.name}`);
+        } else if (attachedFile && attachedFile.name) {
+          // ENHANCED: If file doesn't have geminiUri, try to resolve it from knowledge base
+          console.log(`aiFiverr Variable Processor: File missing geminiUri, attempting to resolve: ${attachedFile.name}`);
+
+          if (window.knowledgeBaseManager) {
+            try {
+              const resolvedFiles = await window.knowledgeBaseManager.resolveKnowledgeBaseFiles([attachedFile]);
+              if (resolvedFiles.length > 0 && resolvedFiles[0].geminiUri) {
+                requiredFiles.push(resolvedFiles[0]);
+                console.log(`aiFiverr Variable Processor: Successfully resolved file: ${resolvedFiles[0].name}`);
+              } else {
+                console.warn(`aiFiverr Variable Processor: Could not resolve file: ${attachedFile.name}`);
+              }
+            } catch (error) {
+              console.error(`aiFiverr Variable Processor: Error resolving file ${attachedFile.name}:`, error);
+            }
+          }
         }
       }
     }

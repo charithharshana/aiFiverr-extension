@@ -4942,16 +4942,43 @@ class PopupManager {
       const fileName = fileItem.querySelector('.kb-file-name').textContent;
       const fileMeta = fileItem.querySelector('.kb-file-meta').textContent;
       const fileIcon = fileItem.querySelector('.kb-file-icon').textContent;
+      const fileId = checkbox.value;
 
-      selectedFiles.push({
-        id: checkbox.value,
-        name: fileName,
-        meta: fileMeta,
-        icon: fileIcon
-      });
+      // CRITICAL FIX: Find and include full file data with geminiUri
+      let fullFileData = null;
+      if (this.knowledgeBaseFiles && Array.isArray(this.knowledgeBaseFiles)) {
+        fullFileData = this.knowledgeBaseFiles.find(file =>
+          file.id === fileId ||
+          file.driveFileId === fileId ||
+          file.name === fileName
+        );
+      }
+
+      // Store full file data if available, otherwise store basic info
+      if (fullFileData && fullFileData.geminiUri) {
+        console.log('aiFiverr: Attaching file with full data:', fileName, 'geminiUri:', fullFileData.geminiUri);
+        selectedFiles.push({
+          id: fullFileData.id || fullFileData.driveFileId || fileId,
+          driveFileId: fullFileData.driveFileId || fullFileData.id || fileId,
+          name: fullFileData.name || fileName,
+          mimeType: fullFileData.mimeType,
+          geminiUri: fullFileData.geminiUri,
+          size: fullFileData.size,
+          meta: fileMeta,
+          icon: fileIcon
+        });
+      } else {
+        console.warn('aiFiverr: Attaching file with basic data only (no geminiUri):', fileName);
+        selectedFiles.push({
+          id: fileId,
+          name: fileName,
+          meta: fileMeta,
+          icon: fileIcon
+        });
+      }
     });
 
-    console.log('aiFiverr: Selected files:', selectedFiles);
+    console.log('aiFiverr: Selected files with full data:', selectedFiles);
     this.displaySelectedFiles(selectedFiles);
     overlay.remove();
     console.log('aiFiverr: File selector modal closed');
@@ -4966,16 +4993,30 @@ class PopupManager {
       return;
     }
 
-    container.innerHTML = files.map(file => `
-      <div class="selected-file-item" data-file-id="${file.id}">
-        <div class="selected-file-info">
-          <span class="selected-file-icon">${file.icon}</span>
-          <span class="selected-file-name">${file.name}</span>
-          <span class="selected-file-size">${file.meta}</span>
+    container.innerHTML = files.map(file => {
+      // Use the primary ID (prefer driveFileId if available)
+      const primaryId = file.driveFileId || file.id;
+
+      // Add data attributes for full file data (for debugging and future use)
+      const dataAttributes = [
+        `data-file-id="${primaryId}"`,
+        file.geminiUri ? `data-gemini-uri="${file.geminiUri}"` : '',
+        file.mimeType ? `data-mime-type="${file.mimeType}"` : '',
+        file.size ? `data-file-size="${file.size}"` : ''
+      ].filter(attr => attr).join(' ');
+
+      return `
+        <div class="selected-file-item" ${dataAttributes}>
+          <div class="selected-file-info">
+            <span class="selected-file-icon">${file.icon || '📄'}</span>
+            <span class="selected-file-name">${file.name}</span>
+            <span class="selected-file-size">${file.meta || (file.size ? this.formatFileSize(file.size) : 'Unknown size')}</span>
+            ${file.geminiUri ? '<span class="file-ready-indicator" title="Ready for AI">✅</span>' : '<span class="file-not-ready-indicator" title="Not uploaded to Gemini">⚠️</span>'}
+          </div>
+          <button class="remove-selected-file" data-file-id="${primaryId}">×</button>
         </div>
-        <button class="remove-selected-file" data-file-id="${file.id}">×</button>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     container.style.display = 'block';
     container.classList.add('has-files');
@@ -5026,14 +5067,48 @@ class PopupManager {
       const fileMeta = item.querySelector('.selected-file-size').textContent;
       const fileIcon = item.querySelector('.selected-file-icon').textContent;
 
-      // Return basic file info - the actual file data with geminiUri will be resolved later
-      return {
-        id: fileId,
-        name: fileName,
-        meta: fileMeta,
-        icon: fileIcon
-      };
+      // CRITICAL FIX: Try to get full file data with geminiUri from knowledgeBaseFiles
+      // This ensures that when prompts are saved, they include all necessary file data for API calls
+      let fullFileData = null;
+      if (this.knowledgeBaseFiles && Array.isArray(this.knowledgeBaseFiles)) {
+        fullFileData = this.knowledgeBaseFiles.find(file =>
+          file.id === fileId ||
+          file.driveFileId === fileId ||
+          file.name === fileName
+        );
+      }
+
+      // If we found full file data, use it; otherwise fall back to basic info
+      if (fullFileData && fullFileData.geminiUri) {
+        console.log('aiFiverr Popup: Found full file data for prompt attachment:', fileName, 'with geminiUri');
+        return {
+          id: fullFileData.id || fullFileData.driveFileId || fileId,
+          driveFileId: fullFileData.driveFileId || fullFileData.id || fileId,
+          name: fullFileData.name || fileName,
+          mimeType: fullFileData.mimeType,
+          geminiUri: fullFileData.geminiUri,
+          size: fullFileData.size,
+          meta: fileMeta,
+          icon: fileIcon
+        };
+      } else {
+        console.warn('aiFiverr Popup: Could not find full file data for:', fileName, 'saving basic info only');
+        return {
+          id: fileId,
+          name: fileName,
+          meta: fileMeta,
+          icon: fileIcon
+        };
+      }
     });
+  }
+
+  formatFileSize(bytes) {
+    if (!bytes || bytes === 0) return 'Unknown size';
+
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
   }
 
   getFileIcon(mimeType) {

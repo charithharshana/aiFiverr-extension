@@ -1839,6 +1839,7 @@ class KnowledgeBaseManager {
           console.log('aiFiverr KB: File already has geminiUri:', fileRef.name, fileRef.geminiUri);
           resolvedFiles.push({
             id: fileRef.id || fileRef.driveFileId,
+            driveFileId: fileRef.driveFileId || fileRef.id,
             name: fileRef.name,
             mimeType: fileRef.mimeType,
             geminiUri: fileRef.geminiUri,
@@ -1859,6 +1860,19 @@ class KnowledgeBaseManager {
         if (!fullFileData && fileRef.driveFileId) {
           console.log('aiFiverr KB: Looking up file by driveFileId:', fileRef.driveFileId);
           fullFileData = this.getFileReference(fileRef.driveFileId);
+        }
+
+        // ENHANCED: Also try to find by name if ID lookup fails
+        if (!fullFileData && fileRef.name) {
+          console.log('aiFiverr KB: Looking up file by name:', fileRef.name);
+          const allFiles = Array.from(this.files.values());
+          fullFileData = allFiles.find(file =>
+            file.name === fileRef.name ||
+            (file.name && file.name.toLowerCase() === fileRef.name.toLowerCase())
+          );
+          if (fullFileData) {
+            console.log('aiFiverr KB: Found file by name match:', fullFileData.name);
+          }
         }
 
         // If not found by ID, try by name
