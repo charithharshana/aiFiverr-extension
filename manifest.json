@@ -53,9 +53,7 @@
       ],
       "js": [
         "firebase/firebase-config.js",
-        "firebase/auth/firebase-auth-service.js",
         "firebase/database/firebase-database-service.js",
-        "firebase/tests/quick-auth-test.js",
         "content/libs/showdown.min.js",
         "content/utils/helpers.js",
         "content/utils/storage.js",
@@ -64,7 +62,7 @@
         "content/utils/markdown-renderer.js",
         "content/utils/advanced-editor.js",
         "content/utils/chatAssistantManager.js",
-        "content/auth/google-auth.js",
+        "content/auth/firebase-google-auth.js",
         "content/auth/firebase-google-client.js",
         "content/auth/google-drive-client.js",
         "content/fiverr/detector.js",
