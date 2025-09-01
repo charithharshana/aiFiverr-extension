@@ -580,30 +580,16 @@ async function handleValidateToken(sendResponse) {
 // Handle getting knowledge base files (merged Drive + Gemini data)
 async function handleGetKnowledgeBaseFiles(sendResponse) {
   try {
-    // Only log if debugging is enabled to reduce console noise
-    if (window.aiFiverrDebug) {
-      console.log('📁 Firebase Background: Getting merged knowledge base files...');
-    }
+    console.log('📁 Firebase Background: Getting merged knowledge base files...');
 
     if (!authState.isAuthenticated || !authState.accessToken) {
-      // Don't log error for unauthenticated state - this is expected on fresh install
-      sendResponse({
-        success: false,
-        error: 'Authentication required to access knowledge base files',
-        requiresAuth: true
-      });
-      return;
+      throw new Error('Authentication required to access knowledge base files');
     }
 
     // Validate and refresh token if needed
     const tokenValid = await validateAndRefreshToken();
     if (!tokenValid) {
-      sendResponse({
-        success: false,
-        error: 'Unable to obtain valid access token. Please sign out and sign in again.',
-        requiresAuth: true
-      });
-      return;
+      throw new Error('Unable to obtain valid access token. Please sign out and sign in again.');
     }
 
     // Get aiFiverr folder ID
@@ -705,20 +691,16 @@ async function handleGetKnowledgeBaseFiles(sendResponse) {
     });
 
   } catch (error) {
-    // Only log authentication errors if debugging is enabled to reduce console noise
+    // Reduce console spam for authentication errors on fresh installs
     if (error.message.includes('Authentication required')) {
+      // Only log authentication errors if debugging is enabled
       if (window.aiFiverrDebug) {
         console.log('📁 Firebase Background: Authentication required for knowledge base files');
       }
-      sendResponse({
-        success: false,
-        error: error.message,
-        requiresAuth: true
-      });
     } else {
       console.error('❌ Firebase Background: Get knowledge base files error:', error);
-      sendResponse({ success: false, error: error.message });
     }
+    sendResponse({ success: false, error: error.message });
   }
 }
 

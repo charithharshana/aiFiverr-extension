@@ -31,19 +31,20 @@ class PopupManager {
       // Load initial data
       await this.loadDashboardData();
 
-      // Only initialize Knowledge Base Files if authenticated and on files tab
+      // Initialize Knowledge Base Files if on files tab and user is authenticated
       const activeTab = document.querySelector('.kb-tab-btn.active');
       if (activeTab && activeTab.dataset.tab === 'files') {
-        const authResult = await this.checkGoogleAuth();
-        if (authResult.success) {
-          await this.loadKnowledgeBaseFiles();
-        } else {
-          // Show authentication prompt instead of error
-          this.displayKnowledgeBaseFilesError('Please sign in with Google to view files');
-        }
+        await this.loadKnowledgeBaseFilesWithAuthCheck();
       }
 
-      // Don't preload files in background - only load when needed and authenticated
+      // Don't automatically load files in background on fresh install
+      // Only load if user has previously authenticated
+      setTimeout(async () => {
+        const authStatus = await this.checkGoogleAuth();
+        if (authStatus.success) {
+          this.loadKnowledgeBaseFiles();
+        }
+      }, 1000);
     } catch (error) {
       console.error('Popup initialization failed:', error);
       // Remove popup error message - just log to console
@@ -3909,6 +3910,21 @@ class PopupManager {
     throw new Error('File processing timeout');
   }
 
+  async loadKnowledgeBaseFilesWithAuthCheck() {
+    try {
+      const authResult = await this.checkGoogleAuth();
+      if (authResult.success) {
+        await this.loadKnowledgeBaseFiles();
+      } else {
+        // Show authentication prompt instead of error
+        this.displayKnowledgeBaseFilesError('Please sign in with Google to view files');
+      }
+    } catch (error) {
+      console.error('aiFiverr Popup: Failed to load knowledge base files with auth check:', error);
+      this.displayKnowledgeBaseFilesError('Failed to load files. Please try again.');
+    }
+  }
+
   async loadKnowledgeBaseFiles() {
     try {
       // Only log if debugging is enabled
@@ -3916,14 +3932,8 @@ class PopupManager {
         console.log('aiFiverr Popup: Loading knowledge base files...');
       }
 
-      // Check authentication first - don't show errors on fresh install
-      const authResult = await this.checkGoogleAuth();
-
-      if (!authResult.success) {
-        // Show authentication prompt instead of error message
-        this.displayKnowledgeBaseFilesError('Please sign in with Google to view files');
-        return;
-      }
+      // Note: This method should only be called after authentication is confirmed
+      // Use loadKnowledgeBaseFilesWithAuthCheck() for automatic auth checking
 
       // Get files from Google Drive
       console.log('aiFiverr Popup: Getting Drive files...');
@@ -3943,11 +3953,13 @@ class PopupManager {
       this.updateKnowledgeBaseStats(allFiles);
 
     } catch (error) {
-      // Only log non-authentication errors to reduce console noise
-      if (!error.message.includes('Authentication required')) {
+      // Reduce console spam for authentication errors on fresh installs
+      if (error.message.includes('Authentication required')) {
+        if (window.aiFiverrDebug) {
+          console.log('aiFiverr Popup: Authentication required for knowledge base files');
+        }
+      } else {
         console.error('aiFiverr Popup: Failed to load knowledge base files:', error);
-      } else if (window.aiFiverrDebug) {
-        console.log('aiFiverr Popup: Authentication required for knowledge base files');
       }
       this.displayKnowledgeBaseFilesError(error.message);
     }
