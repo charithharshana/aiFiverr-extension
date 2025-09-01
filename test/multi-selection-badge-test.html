@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>aiFiverr Multi-Selection Badge Counter Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .test-content {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 10px 0;
+            border: 1px solid #e9ecef;
+        }
+        .selectable-text {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #ffc107;
+        }
+        .test-instructions {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .test-results {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .keyboard-shortcut {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+        }
+        .feature-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .feature-list li {
+            background: white;
+            margin: 8px 0;
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 4px solid #28a745;
+        }
+        .feature-list li.testing {
+            border-left-color: #ffc107;
+        }
+        .feature-list li.completed {
+            border-left-color: #28a745;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 aiFiverr Multi-Selection Badge Counter Test</h1>
+    
+    <div class="test-instructions">
+        <h2>📋 Test Instructions</h2>
+        <p>This page tests the new multi-selection badge counter feature and other enhancements:</p>
+        <ul class="feature-list">
+            <li><strong>Badge Counter:</strong> Extension icon should show a number badge counting text selections</li>
+            <li><strong>Keyboard Shortcut:</strong> <span class="keyboard-shortcut">Ctrl+Alt+A</span> should open AI assistance chat</li>
+            <li><strong>Reset Button:</strong> Improved styling and functionality in floating menu</li>
+            <li><strong>Multi-Selection:</strong> Multiple text selections should append to {conversation} variable</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>🎯 Badge Counter Test</h2>
+        <div class="test-instructions">
+            <p><strong>Expected Behavior:</strong></p>
+            <ol>
+                <li>Select text below → Badge should show "1"</li>
+                <li>Select different text → Badge should show "2"</li>
+                <li>Continue selecting → Badge increments</li>
+                <li>Click reset button (🔄) → Badge clears</li>
+                <li>Close floating icon → Badge clears</li>
+            </ol>
+        </div>
+        
+        <div class="selectable-text">
+            <strong>First Selection:</strong> This is the first piece of text to select for testing the badge counter functionality.
+        </div>
+        
+        <div class="selectable-text">
+            <strong>Second Selection:</strong> This is the second piece of text that should increment the badge counter to 2.
+        </div>
+        
+        <div class="selectable-text">
+            <strong>Third Selection:</strong> This third selection should increment the badge counter to 3, demonstrating the multi-selection feature.
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>⌨️ Keyboard Shortcut Test</h2>
+        <div class="test-instructions">
+            <p><strong>Test the new keyboard shortcut:</strong></p>
+            <ol>
+                <li>Press <span class="keyboard-shortcut">Ctrl+Alt+A</span> (or <span class="keyboard-shortcut">Cmd+Alt+A</span> on Mac)</li>
+                <li>AI assistance chat should open</li>
+                <li>Verify it works from any page</li>
+            </ol>
+        </div>
+        
+        <div class="test-content">
+            <p>Click anywhere on this page and then use the keyboard shortcut to test the AI assistance chat opening.</p>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔄 Reset Button UI Test</h2>
+        <div class="test-instructions">
+            <p><strong>Test the improved reset button:</strong></p>
+            <ol>
+                <li>Select text to show floating icon</li>
+                <li>Click the floating icon to open menu</li>
+                <li>Look for the 🔄 button in the reply section header</li>
+                <li>Verify improved styling (better spacing, hover effects)</li>
+                <li>Click reset button to clear variables and badge</li>
+            </ol>
+        </div>
+        
+        <div class="selectable-text">
+            Select this text to test the reset button functionality and improved UI styling.
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>📝 Input Field Tests</h2>
+        <div class="test-instructions">
+            <p>Test text selection in various input types:</p>
+        </div>
+        
+        <div class="test-content">
+            <label>Text Input:</label>
+            <input type="text" value="Select this text in an input field to test badge counter">
+            
+            <label>Textarea:</label>
+            <textarea rows="3">Select this text in a textarea to test the multi-selection badge counter functionality. This should also increment the badge.</textarea>
+            
+            <div contenteditable="true" style="border: 1px solid #ced4da; padding: 8px; border-radius: 4px; margin: 5px 0;">
+                This is a contenteditable div. Select this text to test badge counter with contenteditable elements.
+            </div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔍 Multi-Selection Conversation Building Test</h2>
+        <div class="test-instructions">
+            <p><strong>Test the conversation building feature:</strong></p>
+            <ol>
+                <li>Select multiple different pieces of text</li>
+                <li>Each selection should increment the badge</li>
+                <li>Open floating menu to see accumulated {conversation} variable</li>
+                <li>Verify selections are separated by "---"</li>
+                <li>Test duplicate detection (select same text twice)</li>
+            </ol>
+        </div>
+        
+        <div class="selectable-text">
+            <strong>Message 1:</strong> "Hi, I'm interested in your web development services. Can you help me build an e-commerce website?"
+        </div>
+        
+        <div class="selectable-text">
+            <strong>Message 2:</strong> "I need it to have payment integration, inventory management, and mobile responsiveness."
+        </div>
+        
+        <div class="selectable-text">
+            <strong>Message 3:</strong> "What's your timeline and pricing for a project like this?"
+        </div>
+        
+        <div class="selectable-text">
+            <strong>Duplicate Test:</strong> "Hi, I'm interested in your web development services. Can you help me build an e-commerce website?"
+        </div>
+    </div>
+
+    <div class="test-results">
+        <h2>✅ Test Checklist</h2>
+        <ul class="feature-list">
+            <li id="badge-counter">Badge Counter: Shows number on extension icon ⏳</li>
+            <li id="badge-increment">Badge Increment: Increases with each selection ⏳</li>
+            <li id="badge-reset">Badge Reset: Clears when reset button clicked ⏳</li>
+            <li id="keyboard-shortcut">Keyboard Shortcut: Ctrl+Alt+A opens AI chat ⏳</li>
+            <li id="reset-button-ui">Reset Button UI: Improved styling and hover effects ⏳</li>
+            <li id="multi-selection">Multi-Selection: Appends to {conversation} variable ⏳</li>
+            <li id="duplicate-detection">Duplicate Detection: Prevents duplicate content ⏳</li>
+            <li id="input-field-support">Input Field Support: Works in inputs/textareas ⏳</li>
+        </ul>
+    </div>
+
+    <script>
+        // Test helper functions
+        function markTestComplete(testId) {
+            const element = document.getElementById(testId);
+            if (element) {
+                element.classList.add('completed');
+                element.innerHTML = element.innerHTML.replace('⏳', '✅');
+            }
+        }
+
+        function markTestTesting(testId) {
+            const element = document.getElementById(testId);
+            if (element) {
+                element.classList.add('testing');
+                element.innerHTML = element.innerHTML.replace('⏳', '🧪');
+            }
+        }
+
+        // Log test events
+        console.log('🧪 aiFiverr Badge Counter Test Page Loaded');
+        console.log('📋 Test Instructions:');
+        console.log('1. Select text to test badge counter');
+        console.log('2. Use Ctrl+Alt+A to test keyboard shortcut');
+        console.log('3. Test reset button functionality');
+        console.log('4. Verify multi-selection conversation building');
+        
+        // Monitor for extension messages (if available)
+        if (typeof chrome !== 'undefined' && chrome.runtime) {
+            console.log('🔗 Chrome extension API available for testing');
+        } else {
+            console.log('⚠️ Chrome extension API not available - testing in standalone mode');
+        }
+    </script>
+</body>
+</html>

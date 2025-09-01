@@ -4820,83 +4820,68 @@ class PopupManager {
       this.attachSelectedFiles();
     });
 
-    // Refresh button functionality - IMPROVED VERSION
+    // Refresh button functionality
     if (refreshBtn) {
       refreshBtn.addEventListener('click', async () => {
         refreshBtn.disabled = true;
         refreshBtn.textContent = '⏳';
 
         try {
-          this.showToast('Refreshing knowledge base files...', 'info');
-
           // First get current files
           const currentFiles = await this.getKnowledgeBaseFiles();
-          console.log('aiFiverr: Current files before refresh:', currentFiles.length);
 
           // Check for files without Gemini URIs and re-upload them
           const filesToReupload = currentFiles.filter(file => !file.geminiUri);
-          console.log('aiFiverr: Files to re-upload:', filesToReupload.length);
 
           if (filesToReupload.length > 0) {
             this.showToast(`Re-uploading ${filesToReupload.length} files to Gemini...`, 'info');
 
-            // Process files sequentially to avoid overwhelming the API
             for (const file of filesToReupload) {
               try {
-                console.log('aiFiverr: Re-uploading file:', file.name);
                 await this.refreshGeminiFile(file.id);
-                console.log('aiFiverr: Successfully re-uploaded:', file.name);
               } catch (error) {
-                console.warn(`aiFiverr: Failed to re-upload ${file.name}:`, error);
-                this.showToast(`Warning: Failed to refresh ${file.name}`, 'warning');
+                console.warn(`Failed to re-upload ${file.name}:`, error);
               }
             }
           }
 
           // Get refreshed files after re-upload
           const refreshedFiles = await this.getKnowledgeBaseFiles();
-          console.log('aiFiverr: Files after refresh:', refreshedFiles.length);
-          // Update the file list in the modal with improved error handling
+          // Update the file list in the modal
           const fileList = overlay.querySelector('.kb-file-selector-list');
-          if (fileList) {
-            fileList.innerHTML = refreshedFiles.length > 0 ? refreshedFiles.map(file => `
-              <div class="kb-file-selector-item" data-file-id="${file.id}">
-                <label class="kb-file-checkbox-label">
-                  <input type="checkbox" class="kb-file-checkbox" value="${file.id}">
-                  <div class="kb-file-item-content">
-                    <div class="kb-file-icon">${this.getFileIcon(file.mimeType)}</div>
-                    <div class="kb-file-info">
-                      <div class="kb-file-name">${file.name}</div>
-                      <div class="kb-file-meta">${this.formatFileSize(file.size)} • ${file.mimeType}</div>
-                      ${file.geminiUri ? `<div class="kb-file-gemini-uri" title="Gemini URI: ${file.geminiUri}">🔗 ${file.geminiUri.split('/').pop()}</div>` : '<div class="kb-file-no-uri">⚠️ No Gemini URI - click refresh to upload</div>'}
-                    </div>
-                    <div class="kb-file-status">
-                      <span class="status-indicator ${this.getFileConnectionStatus(file)}" title="Gemini Status: ${this.getFileConnectionStatus(file)}"></span>
-                    </div>
+          fileList.innerHTML = refreshedFiles.length > 0 ? refreshedFiles.map(file => `
+            <div class="kb-file-selector-item" data-file-id="${file.id}">
+              <label class="kb-file-checkbox-label">
+                <input type="checkbox" class="kb-file-checkbox" value="${file.id}">
+                <div class="kb-file-item-content">
+                  <div class="kb-file-icon">${this.getFileIcon(file.mimeType)}</div>
+                  <div class="kb-file-info">
+                    <div class="kb-file-name">${file.name}</div>
+                    <div class="kb-file-meta">${this.formatFileSize(file.size)} • ${file.mimeType}</div>
+                    ${file.geminiUri ? `<div class="kb-file-gemini-uri" title="Gemini URI: ${file.geminiUri}">🔗 ${file.geminiUri.split('/').pop()}</div>` : '<div class="kb-file-no-uri">⚠️ No Gemini URI - click refresh to upload</div>'}
                   </div>
-                </label>
-              </div>
-            `).join('') : `
-              <div class="kb-files-empty">
-                <div class="kb-files-empty-icon">📁</div>
-                <h4>No files available</h4>
-                <p>Upload files to your knowledge base first.<br>Go to Settings → Knowledge Base → Files tab to upload files.</p>
-              </div>
-            `;
+                  <div class="kb-file-status">
+                    <span class="status-indicator ${this.getFileConnectionStatus(file)}" title="Gemini Status: ${this.getFileConnectionStatus(file)}"></span>
+                  </div>
+                </div>
+              </label>
+            </div>
+          `).join('') : `
+            <div class="kb-files-empty">
+              <div class="kb-files-empty-icon">📁</div>
+              <h4>No files available</h4>
+              <p>Upload files to your knowledge base first.<br>Go to Settings → Knowledge Base → Files tab to upload files.</p>
+            </div>
+          `;
 
-            // Re-attach event listeners for new checkboxes
-            const selectedCount = overlay.querySelector('.selected-count');
-            if (selectedCount) {
-              overlay.querySelectorAll('.kb-file-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', () => {
-                  const selected = overlay.querySelectorAll('.kb-file-checkbox:checked').length;
-                  selectedCount.textContent = `${selected} file${selected !== 1 ? 's' : ''} selected`;
-                });
-              });
-            }
-
-            console.log('aiFiverr: File list updated successfully');
-          }
+          // Re-attach event listeners for new checkboxes
+          const selectedCount = overlay.querySelector('.selected-count');
+          overlay.querySelectorAll('.kb-file-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', () => {
+              const selected = overlay.querySelectorAll('.kb-file-checkbox:checked').length;
+              selectedCount.textContent = `${selected} file${selected !== 1 ? 's' : ''} selected`;
+            });
+          });
 
           this.showToast('Files refreshed successfully', 'success');
         } catch (error) {

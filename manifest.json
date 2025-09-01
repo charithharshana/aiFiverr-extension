@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "aiFiverr AI Web Assistant",
-  "description": "AI-powered web assistant extension that works on fiverr.com or any website",
+  "name": "aiFiverr - AI-Powered Fiverr Assistant (Firebase)",
+  "description": "Cross-browser AI-powered Fiverr assistant with Firebase authentication and cloud storage",
   "version": "2.1.1",
   "permissions": [
     "activeTab",
@@ -62,7 +62,7 @@
         "content/utils/markdown-renderer.js",
         "content/utils/advanced-editor.js",
         "content/utils/chatAssistantManager.js",
-        "content/auth/google-auth.js",
+        "content/auth/firebase-google-auth.js",
         "content/auth/firebase-google-client.js",
         "content/auth/google-drive-client.js",
         "content/fiverr/detector.js",

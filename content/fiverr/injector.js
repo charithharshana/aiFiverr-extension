@@ -563,53 +563,74 @@ class FiverrInjector {
   }
 
   /**
-   * Populate dropdown with custom prompts - SAME AS FLOATING MESSAGE FEATURE
+   * Populate dropdown with custom prompts
    */
   async populatePromptDropup(dropdown, inputElement) {
     try {
       // Clear existing content
       dropdown.innerHTML = '';
 
-      // Get ONLY CUSTOM PROMPTS (same as floating message feature)
+      // Get ALL prompts (default + custom) - always show all available prompts
+      let allPrompts = {};
+
+      // Load default prompts
+      const defaultPrompts = this.getDefaultPrompts();
+      allPrompts = { ...defaultPrompts };
+
+      // Load custom prompts from storage with enhanced error handling
       let customPrompts = {};
+      let defaultPromptVisibility = {};
 
-      // Check if prompt manager is available for better filtering
-      if (window.promptManager && window.promptManager.initialized) {
-        // Use prompt manager to get only custom prompts
-        customPrompts = window.promptManager.getCustomPrompts();
-        console.log('aiFiverr Injector: Got custom prompts from prompt manager:', Object.keys(customPrompts));
-      } else {
-        // Fallback: load from storage and filter manually
-        try {
-          const customPromptsResult = await chrome.storage.local.get('customPrompts');
-          const allStoredPrompts = customPromptsResult.customPrompts || {};
+      try {
+        const customPromptsResult = await chrome.storage.local.get('customPrompts');
+        customPrompts = customPromptsResult.customPrompts || {};
 
-          // Filter to show only custom prompts (exclude default prompts)
-          Object.entries(allStoredPrompts).forEach(([key, prompt]) => {
-            // Only include prompts that are explicitly marked as custom (not default)
-            if (prompt.isDefault === false || (!prompt.hasOwnProperty('isDefault') && !this.isDefaultPromptKey(key))) {
-              customPrompts[key] = prompt;
-            }
-          });
+        console.log('aiFiverr Injector: Raw custom prompts from storage:', customPromptsResult);
+        console.log('aiFiverr Injector: Processed custom prompts:', customPrompts);
 
-          console.log('aiFiverr Injector: Filtered custom prompts from storage:', Object.keys(customPrompts));
-        } catch (error) {
-          console.warn('aiFiverr Injector: Failed to load custom prompts from storage:', error);
-        }
+        // Load floating icon visibility settings
+        const visibilityResult = await chrome.storage.local.get('floatingIconVisibility');
+        const floatingIconVisibility = visibilityResult.floatingIconVisibility || {};
+
+        // Filter default prompts based on floating icon visibility settings
+        const visibleDefaultPrompts = {};
+        Object.entries(defaultPrompts).forEach(([key, prompt]) => {
+          // Default to visible if not explicitly set to false
+          if (floatingIconVisibility[key] !== false) {
+            visibleDefaultPrompts[key] = prompt;
+          }
+        });
+
+        // Filter custom prompts based on floating icon visibility settings
+        const visibleCustomPrompts = {};
+        Object.entries(customPrompts).forEach(([key, prompt]) => {
+          // Default to visible if not explicitly set to false
+          if (floatingIconVisibility[key] !== false) {
+            visibleCustomPrompts[key] = prompt;
+          }
+        });
+
+        // Merge visible prompts (custom prompts override defaults)
+        allPrompts = { ...visibleDefaultPrompts, ...visibleCustomPrompts };
+
+        console.log('aiFiverr: Loaded prompts for dropdown:', {
+          defaultTotal: Object.keys(defaultPrompts).length,
+          defaultVisible: Object.keys(visibleDefaultPrompts).length,
+          customTotal: Object.keys(customPrompts).length,
+          customVisible: Object.keys(visibleCustomPrompts).length,
+          totalVisible: Object.keys(allPrompts).length,
+          visiblePromptKeys: Object.keys(allPrompts)
+        });
+      } catch (error) {
+        console.warn('aiFiverr: Failed to load custom prompts, using defaults only:', error);
       }
 
-      console.log('aiFiverr Injector: Available custom prompts for chat button:', {
-        total: Object.keys(customPrompts).length,
-        promptKeys: Object.keys(customPrompts),
-        samplePrompt: Object.keys(customPrompts).length > 0 ? customPrompts[Object.keys(customPrompts)[0]] : null
-      });
-
-      if (!customPrompts || Object.keys(customPrompts).length === 0) {
-        dropdown.innerHTML = '<div style="padding: 12px; color: #6b7280;">No custom prompts available</div>';
+      if (!allPrompts || Object.keys(allPrompts).length === 0) {
+        dropdown.innerHTML = '<div style="padding: 12px; color: #6b7280;">No prompts available</div>';
         return;
       }
 
-      this.renderPromptItems(dropdown, customPrompts, inputElement);
+      this.renderPromptItems(dropdown, allPrompts, inputElement);
     } catch (error) {
       console.error('Failed to populate prompt dropdown:', error);
       dropdown.innerHTML = '<div style="padding: 12px; color: #6b7280;">Failed to load prompts</div>';
@@ -757,17 +778,6 @@ class FiverrInjector {
       console.error('Failed to get custom prompts:', error);
       return {};
     }
-  }
-
-  /**
-   * Check if a prompt key corresponds to a default prompt
-   */
-  isDefaultPromptKey(key) {
-    const defaultPromptKeys = [
-      'summary', 'follow_up', 'proposal', 'project_proposal',
-      'translate', 'improve_translate', 'improve'
-    ];
-    return defaultPromptKeys.includes(key);
   }
 
   /**
