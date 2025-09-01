@@ -3630,7 +3630,8 @@ class PopupManager {
   // Knowledge Base Files Methods
   async checkGoogleAuth() {
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'GOOGLE_AUTH_STATUS' });
+      // Use Firebase authentication to match the background service
+      const response = await chrome.runtime.sendMessage({ type: 'FIREBASE_AUTH_STATUS' });
       return response || { success: false, error: 'No auth response' };
     } catch (error) {
       console.error('Failed to check Google auth:', error);
@@ -3944,33 +3945,49 @@ class PopupManager {
 
   async getGoogleDriveFiles() {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        type: 'GET_DRIVE_FILES'
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else if (response && response.success) {
-          resolve(response.data || []);
-        } else {
-          reject(new Error(response?.error || 'Failed to get Drive files'));
-        }
-      });
+      try {
+        chrome.runtime.sendMessage({
+          type: 'GET_DRIVE_FILES'
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.warn('aiFiverr Popup: Runtime error getting Drive files:', chrome.runtime.lastError.message);
+            reject(new Error(chrome.runtime.lastError.message));
+          } else if (response && response.success) {
+            resolve(response.data || []);
+          } else {
+            reject(new Error(response?.error || 'Failed to get Drive files'));
+          }
+        });
+      } catch (error) {
+        console.error('aiFiverr Popup: Error sending message for Drive files:', error);
+        reject(error);
+      }
     });
   }
 
   async getGeminiFiles() {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        type: 'GET_GEMINI_FILES'
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve([]); // Gemini files are optional
-        } else if (response && response.success) {
-          resolve(response.data || []);
-        } else {
-          resolve([]); // Gemini files are optional
+      try {
+        chrome.runtime.sendMessage({
+          type: 'GET_GEMINI_FILES'
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            if (window.aiFiverrDebug) {
+              console.warn('aiFiverr Popup: Runtime error getting Gemini files:', chrome.runtime.lastError.message);
+            }
+            resolve([]); // Gemini files are optional
+          } else if (response && response.success) {
+            resolve(response.data || []);
+          } else {
+            resolve([]); // Gemini files are optional
+          }
+        });
+      } catch (error) {
+        if (window.aiFiverrDebug) {
+          console.error('aiFiverr Popup: Error sending message for Gemini files:', error);
         }
-      });
+        resolve([]); // Gemini files are optional
+      }
     });
   }
 

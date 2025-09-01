@@ -471,10 +471,11 @@ async function handleGetKnowledgeBaseFiles(sendResponse) {
     // Get aiFiverr folder ID
     const folderId = await ensureAiFiverrFolder();
 
-    // Search for knowledge base files in the aiFiverr folder
-    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=parents in '${folderId}' and properties has {key='aiFiverr_type' and value='knowledge_base'} and trashed=false&fields=files(id,name,size,mimeType,createdTime,modifiedTime,webViewLink,properties)`;
+    // Search for knowledge base files in the aiFiverr folder AND all its subfolders
+    // This includes both legacy files in root folder and new organized structure files
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=properties has {key='aiFiverr_type' and value='knowledge_base'} and trashed=false&fields=files(id,name,size,mimeType,createdTime,modifiedTime,webViewLink,properties)`;
 
-    console.log('🔍 Firebase Background: Searching for knowledge base files in folder:', folderId);
+    console.log('🔍 Firebase Background: Searching for knowledge base files in all aiFiverr folders (root + subfolders)');
 
     const response = await fetch(searchUrl, {
       headers: {
@@ -588,11 +589,11 @@ async function handleSearchDriveFiles(message, sendResponse) {
 
     const { query = '' } = message;
 
-    // Get aiFiverr folder ID
-    const folderId = await ensureAiFiverrFolder();
+    // Ensure aiFiverr folder exists (for folder structure validation)
+    await ensureAiFiverrFolder();
 
-    // Build search query
-    let searchQuery = `parents in '${folderId}' and properties has {key='aiFiverr_type' and value='knowledge_base'} and trashed=false`;
+    // Build search query to find files in all aiFiverr folders (root + subfolders)
+    let searchQuery = `properties has {key='aiFiverr_type' and value='knowledge_base'} and trashed=false`;
 
     if (query.trim()) {
       // Add text search to the query
