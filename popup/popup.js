@@ -3690,6 +3690,8 @@ class PopupManager {
       let geminiReadyCount = 0;
       const totalFiles = fileArray.length;
 
+      // Upload files without excessive notifications
+
       for (let i = 0; i < fileArray.length; i++) {
         const file = fileArray[i];
 
@@ -3701,6 +3703,8 @@ class PopupManager {
           const driveResult = await this.uploadFileToGoogleDrive(file);
           uploadedCount++;
 
+          this.showToast(`✅ ${file.name} uploaded to Google Drive`, 'success');
+
           // Phase 2: Upload to Gemini API for immediate use
           progressText.textContent = `Preparing ${file.name} for AI use... (${i + 1}/${totalFiles})`;
           progressFill.style.width = `${(i / totalFiles) * 50 + 25}%`;
@@ -3708,8 +3712,10 @@ class PopupManager {
           try {
             const geminiResult = await this.uploadFileToGeminiAPI(file);
             geminiReadyCount++;
+            this.showToast(`🤖 ${file.name} ready for AI use`, 'success');
           } catch (geminiError) {
             console.warn('Failed to upload to Gemini API:', geminiError);
+            this.showToast(`⚠️ ${file.name} uploaded but needs Gemini preparation`, 'warning');
           }
 
           // Phase 3: Update UI immediately after each file

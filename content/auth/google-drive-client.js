@@ -151,6 +151,31 @@ class GoogleDriveClient {
   }
 
   /**
+   * Get subfolder ID if it exists (helper method)
+   */
+  async getSubfolderId(folderPath, mainFolderId) {
+    try {
+      const pathParts = folderPath.split('/');
+      let currentParentId = mainFolderId;
+
+      for (const folderName of pathParts) {
+        const searchResponse = await this.makeRequest(`/files?q=name='${folderName}' and parents in '${currentParentId}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+
+        if (searchResponse.files && searchResponse.files.length > 0) {
+          currentParentId = searchResponse.files[0].id;
+        } else {
+          return null; // Folder doesn't exist
+        }
+      }
+
+      return currentParentId;
+    } catch (error) {
+      console.warn('aiFiverr Drive: Failed to get subfolder ID for', folderPath, ':', error);
+      return null;
+    }
+  }
+
+  /**
    * Validate file for knowledge base upload
    */
   validateKnowledgeBaseFile(file) {
@@ -256,17 +281,36 @@ class GoogleDriveClient {
   }
 
   /**
-   * List files in aiFiverr folder
+   * List files in organized aiFiverr folder structure
    */
   async listKnowledgeBaseFiles() {
     try {
-      const folderId = await this.ensureAiFiverrFolder();
+      // Get main folder and organized subfolders
+      const mainFolderId = await this.ensureAiFiverrFolder();
+      const knowledgeBaseFolders = [mainFolderId];
 
-      const response = await this.makeRequest(`/files?q=parents in '${folderId}' and trashed=false&fields=files(id,name,size,mimeType,createdTime,modifiedTime,webViewLink,description)`);
+      // Try to get organized subfolders (they may not exist yet)
+      try {
+        const textFolderId = await this.getSubfolderId('knowledge-base/text', mainFolderId);
+        const videoFolderId = await this.getSubfolderId('knowledge-base/video', mainFolderId);
+        const audioFolderId = await this.getSubfolderId('knowledge-base/audio', mainFolderId);
+        const documentsFolderId = await this.getSubfolderId('knowledge-base/documents', mainFolderId);
+
+        if (textFolderId) knowledgeBaseFolders.push(textFolderId);
+        if (videoFolderId) knowledgeBaseFolders.push(videoFolderId);
+        if (audioFolderId) knowledgeBaseFolders.push(audioFolderId);
+        if (documentsFolderId) knowledgeBaseFolders.push(documentsFolderId);
+      } catch (error) {
+        console.log('aiFiverr Drive: Organized folders not found, using main folder only');
+      }
+
+      // Build search query for all folders
+      const folderQuery = knowledgeBaseFolders.map(id => `parents in '${id}'`).join(' or ');
+      const response = await this.makeRequest(`/files?q=(${folderQuery}) and trashed=false&fields=files(id,name,size,mimeType,createdTime,modifiedTime,webViewLink,description)`);
 
       const files = response.files || [];
-      
-      console.log('aiFiverr Drive: Found', files.length, 'knowledge base files');
+
+      console.log('aiFiverr Drive: Found', files.length, 'knowledge base files across', knowledgeBaseFolders.length, 'folders');
 
       return files.map(file => ({
         id: file.id,
