@@ -9,7 +9,20 @@ class GoogleDriveClient {
     this.uploadUrl = "https://www.googleapis.com/upload/drive/v3";
     this.aiFiverrFolderName = "aiFiverr";
     this.aiFiverrFolderId = null;
+    this.subfolderIds = {}; // Cache for subfolder IDs
     this.initialized = false;
+
+    // Define organized folder structure
+    this.folderStructure = {
+      'knowledge-base': {
+        'text': ['txt', 'md', 'docx', 'doc', 'rtf'],
+        'video': ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm'],
+        'audio': ['mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a'],
+        'documents': ['pdf', 'ppt', 'pptx', 'xls', 'xlsx']
+      },
+      'chat': [] // For Fiverr conversation files
+    };
+
     this.init();
   }
 
@@ -82,27 +95,30 @@ class GoogleDriveClient {
 
       // Search for existing folder
       const searchResponse = await this.makeRequest(`/files?q=name='${this.aiFiverrFolderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-      
+
       if (searchResponse.files && searchResponse.files.length > 0) {
         this.aiFiverrFolderId = searchResponse.files[0].id;
         console.log('aiFiverr Drive: Found existing folder:', this.aiFiverrFolderId);
-        return this.aiFiverrFolderId;
+      } else {
+        // Create new folder
+        const createResponse = await this.makeRequest('/files', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            name: this.aiFiverrFolderName,
+            mimeType: 'application/vnd.google-apps.folder'
+          })
+        });
+
+        this.aiFiverrFolderId = createResponse.id;
+        console.log('aiFiverr Drive: Created new folder:', this.aiFiverrFolderId);
       }
 
-      // Create new folder
-      const createResponse = await this.makeRequest('/files', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          name: this.aiFiverrFolderName,
-          mimeType: 'application/vnd.google-apps.folder'
-        })
-      });
+      // Ensure organized subfolder structure exists
+      await this.ensureOrganizedFolderStructure();
 
-      this.aiFiverrFolderId = createResponse.id;
-      console.log('aiFiverr Drive: Created new folder:', this.aiFiverrFolderId);
       return this.aiFiverrFolderId;
 
     } catch (error) {
@@ -112,67 +128,110 @@ class GoogleDriveClient {
   }
 
   /**
-   * Ensure chat folder exists for Fiverr conversations
+   * Create organized subfolder structure within aiFiverr folder
    */
-  async ensureChatFolder() {
+  async ensureOrganizedFolderStructure() {
     try {
-      // First ensure main aiFiverr folder
-      const mainFolderId = await this.ensureAiFiverrFolder();
+      const rootFolderId = this.aiFiverrFolderId;
 
-      // Search for existing chat folder
-      const searchResponse = await this.makeRequest(`/files?q=name='chat' and parents in '${mainFolderId}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+      // Create main category folders
+      for (const [categoryName, subcategories] of Object.entries(this.folderStructure)) {
+        const categoryFolderId = await this.ensureSubfolder(categoryName, rootFolderId);
 
-      if (searchResponse.files && searchResponse.files.length > 0) {
-        console.log('aiFiverr Drive: Found existing chat folder:', searchResponse.files[0].id);
-        return searchResponse.files[0].id;
+        // Create subcategory folders if they exist
+        if (typeof subcategories === 'object' && !Array.isArray(subcategories)) {
+          for (const subcategoryName of Object.keys(subcategories)) {
+            await this.ensureSubfolder(subcategoryName, categoryFolderId);
+          }
+        }
       }
 
-      // Create chat folder
+      console.log('aiFiverr Drive: Organized folder structure ensured');
+    } catch (error) {
+      console.error('aiFiverr Drive: Failed to create organized folder structure:', error);
+    }
+  }
+
+  /**
+   * Ensure a subfolder exists within a parent folder
+   */
+  async ensureSubfolder(folderName, parentFolderId) {
+    try {
+      const cacheKey = `${parentFolderId}/${folderName}`;
+
+      // Check cache first
+      if (this.subfolderIds[cacheKey]) {
+        return this.subfolderIds[cacheKey];
+      }
+
+      // Search for existing subfolder
+      const searchResponse = await this.makeRequest(
+        `/files?q=name='${folderName}' and parents in '${parentFolderId}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
+      );
+
+      if (searchResponse.files && searchResponse.files.length > 0) {
+        const folderId = searchResponse.files[0].id;
+        this.subfolderIds[cacheKey] = folderId;
+        return folderId;
+      }
+
+      // Create new subfolder
       const createResponse = await this.makeRequest('/files', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          name: 'chat',
+          name: folderName,
           mimeType: 'application/vnd.google-apps.folder',
-          parents: [mainFolderId],
-          description: 'aiFiverr Extension - Fiverr Conversations'
+          parents: [parentFolderId]
         })
       });
 
-      console.log('aiFiverr Drive: Created chat folder:', createResponse.id);
-      return createResponse.id;
+      const folderId = createResponse.id;
+      this.subfolderIds[cacheKey] = folderId;
+      console.log(`aiFiverr Drive: Created subfolder '${folderName}':`, folderId);
+      return folderId;
 
     } catch (error) {
-      console.error('aiFiverr Drive: Failed to ensure chat folder:', error);
+      console.error(`aiFiverr Drive: Failed to ensure subfolder '${folderName}':`, error);
       throw error;
     }
   }
 
   /**
-   * Get subfolder ID if it exists (helper method)
+   * Determine the appropriate folder for a file based on its type
    */
-  async getSubfolderId(folderPath, mainFolderId) {
-    try {
-      const pathParts = folderPath.split('/');
-      let currentParentId = mainFolderId;
+  getFileTypeFolder(fileName, mimeType) {
+    const extension = fileName.split('.').pop()?.toLowerCase();
 
-      for (const folderName of pathParts) {
-        const searchResponse = await this.makeRequest(`/files?q=name='${folderName}' and parents in '${currentParentId}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-
-        if (searchResponse.files && searchResponse.files.length > 0) {
-          currentParentId = searchResponse.files[0].id;
-        } else {
-          return null; // Folder doesn't exist
+    // Check each category and subcategory
+    for (const [categoryName, subcategories] of Object.entries(this.folderStructure)) {
+      if (typeof subcategories === 'object' && !Array.isArray(subcategories)) {
+        for (const [subcategoryName, extensions] of Object.entries(subcategories)) {
+          if (extensions.includes(extension)) {
+            return `${categoryName}/${subcategoryName}`;
+          }
         }
       }
-
-      return currentParentId;
-    } catch (error) {
-      console.warn('aiFiverr Drive: Failed to get subfolder ID for', folderPath, ':', error);
-      return null;
     }
+
+    // Default to knowledge-base/documents for unknown types
+    return 'knowledge-base/documents';
+  }
+
+  /**
+   * Get folder ID for a specific file type path
+   */
+  async getFolderIdForPath(folderPath) {
+    const pathParts = folderPath.split('/');
+    let currentFolderId = this.aiFiverrFolderId;
+
+    for (const folderName of pathParts) {
+      currentFolderId = await this.ensureSubfolder(folderName, currentFolderId);
+    }
+
+    return currentFolderId;
   }
 
   /**
@@ -216,7 +275,7 @@ class GoogleDriveClient {
   }
 
   /**
-   * Upload file to Google Drive with enhanced metadata
+   * Upload file to Google Drive with enhanced metadata and organized folder structure
    */
   async uploadFile(file, fileName, description = '', tags = []) {
     try {
@@ -226,19 +285,26 @@ class GoogleDriveClient {
       this.validateKnowledgeBaseFile(file);
 
       // Ensure aiFiverr folder exists
-      const folderId = await this.ensureAiFiverrFolder();
+      await this.ensureAiFiverrFolder();
+
+      // Determine appropriate folder based on file type
+      const folderPath = this.getFileTypeFolder(fileName, file.type);
+      const targetFolderId = await this.getFolderIdForPath(folderPath);
+
+      console.log(`aiFiverr Drive: Uploading '${fileName}' to organized folder: ${folderPath}`);
 
       // Enhanced metadata with knowledge base specific properties
       const metadata = {
         name: fileName,
         description: description || `aiFiverr Knowledge Base file uploaded on ${new Date().toISOString()}`,
-        parents: [folderId],
+        parents: [targetFolderId],
         properties: {
           'aiFiverr_type': 'knowledge_base',
           'aiFiverr_upload_date': new Date().toISOString(),
           'aiFiverr_file_size': file.size.toString(),
           'aiFiverr_mime_type': file.type,
-          'aiFiverr_tags': tags.join(',')
+          'aiFiverr_tags': tags.join(','),
+          'aiFiverr_folder_path': folderPath
         }
       };
 
@@ -281,36 +347,17 @@ class GoogleDriveClient {
   }
 
   /**
-   * List files in organized aiFiverr folder structure
+   * List files in aiFiverr folder
    */
   async listKnowledgeBaseFiles() {
     try {
-      // Get main folder and organized subfolders
-      const mainFolderId = await this.ensureAiFiverrFolder();
-      const knowledgeBaseFolders = [mainFolderId];
+      const folderId = await this.ensureAiFiverrFolder();
 
-      // Try to get organized subfolders (they may not exist yet)
-      try {
-        const textFolderId = await this.getSubfolderId('knowledge-base/text', mainFolderId);
-        const videoFolderId = await this.getSubfolderId('knowledge-base/video', mainFolderId);
-        const audioFolderId = await this.getSubfolderId('knowledge-base/audio', mainFolderId);
-        const documentsFolderId = await this.getSubfolderId('knowledge-base/documents', mainFolderId);
-
-        if (textFolderId) knowledgeBaseFolders.push(textFolderId);
-        if (videoFolderId) knowledgeBaseFolders.push(videoFolderId);
-        if (audioFolderId) knowledgeBaseFolders.push(audioFolderId);
-        if (documentsFolderId) knowledgeBaseFolders.push(documentsFolderId);
-      } catch (error) {
-        console.log('aiFiverr Drive: Organized folders not found, using main folder only');
-      }
-
-      // Build search query for all folders
-      const folderQuery = knowledgeBaseFolders.map(id => `parents in '${id}'`).join(' or ');
-      const response = await this.makeRequest(`/files?q=(${folderQuery}) and trashed=false&fields=files(id,name,size,mimeType,createdTime,modifiedTime,webViewLink,description)`);
+      const response = await this.makeRequest(`/files?q=parents in '${folderId}' and trashed=false&fields=files(id,name,size,mimeType,createdTime,modifiedTime,webViewLink,description)`);
 
       const files = response.files || [];
-
-      console.log('aiFiverr Drive: Found', files.length, 'knowledge base files across', knowledgeBaseFolders.length, 'folders');
+      
+      console.log('aiFiverr Drive: Found', files.length, 'knowledge base files');
 
       return files.map(file => ({
         id: file.id,
@@ -656,22 +703,20 @@ class GoogleDriveClient {
     try {
       console.log('aiFiverr Drive: Saving data file:', fileName);
 
-      // Determine target folder based on data type
-      let targetFolderId;
-      if (data.type === 'fiverr-conversation' || fileName.includes('fiverr-conversation')) {
-        // Use chat folder for Fiverr conversations
-        targetFolderId = await this.ensureChatFolder();
-        console.log('aiFiverr Drive: Saving conversation to chat folder:', targetFolderId);
-      } else {
-        // Use main aiFiverr folder for other data files
-        targetFolderId = await this.ensureAiFiverrFolder();
-      }
+      // Ensure aiFiverr folder exists
+      await this.ensureAiFiverrFolder();
+
+      // Determine folder based on file type - chat files go to chat folder
+      const folderPath = fileName.includes('conversation') || fileName.includes('chat') ? 'chat' : 'knowledge-base/documents';
+      const targetFolderId = await this.getFolderIdForPath(folderPath);
+
+      console.log(`aiFiverr Drive: Saving data file '${fileName}' to organized folder: ${folderPath}`);
 
       // Convert data to JSON
       const jsonData = JSON.stringify(data, null, 2);
       const blob = new Blob([jsonData], { type: 'application/json' });
 
-      // Check if file already exists in target folder
+      // Check if file already exists in the target folder
       const existingFiles = await this.makeRequest(`/files?q=name='${fileName}' and parents in '${targetFolderId}' and trashed=false`);
 
       let fileId = null;
@@ -684,9 +729,10 @@ class GoogleDriveClient {
         description: description || `aiFiverr data file updated on ${new Date().toISOString()}`,
         parents: [targetFolderId],
         properties: {
-          'aiFiverr_type': data.type === 'fiverr-conversation' ? 'conversation' : 'data',
+          'aiFiverr_type': 'data',
           'aiFiverr_data_type': fileName.replace('.json', ''),
-          'aiFiverr_upload_date': new Date().toISOString()
+          'aiFiverr_upload_date': new Date().toISOString(),
+          'aiFiverr_folder_path': folderPath
         }
       };
 
@@ -731,17 +777,26 @@ class GoogleDriveClient {
   }
 
   /**
-   * Load data from Google Drive JSON file
+   * Load data from Google Drive JSON file with organized folder structure support
    */
   async loadDataFile(fileName) {
     try {
       console.log('aiFiverr Drive: Loading data file:', fileName);
 
       // Ensure aiFiverr folder exists
-      const folderId = await this.ensureAiFiverrFolder();
+      await this.ensureAiFiverrFolder();
 
-      // Search for the file
-      const searchResponse = await this.makeRequest(`/files?q=name='${fileName}' and parents in '${folderId}' and trashed=false`);
+      // Determine likely folder based on file type
+      const folderPath = fileName.includes('conversation') || fileName.includes('chat') ? 'chat' : 'knowledge-base/documents';
+      const targetFolderId = await this.getFolderIdForPath(folderPath);
+
+      // Search for the file in the organized folder first
+      let searchResponse = await this.makeRequest(`/files?q=name='${fileName}' and parents in '${targetFolderId}' and trashed=false`);
+
+      // If not found in organized folder, search in root aiFiverr folder (for backward compatibility)
+      if (!searchResponse.files || searchResponse.files.length === 0) {
+        searchResponse = await this.makeRequest(`/files?q=name='${fileName}' and parents in '${this.aiFiverrFolderId}' and trashed=false`);
+      }
 
       if (!searchResponse.files || searchResponse.files.length === 0) {
         return { success: false, error: 'File not found' };

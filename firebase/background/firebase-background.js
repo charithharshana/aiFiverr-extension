@@ -82,14 +82,8 @@ async function sendMessageToOffscreen(message) {
           clearTimeout(timeout);
 
           if (chrome.runtime.lastError) {
-            const errorMsg = chrome.runtime.lastError.message;
-            // Use debug level for common connection errors
-            if (errorMsg.includes('Receiving end does not exist') || errorMsg.includes('Extension context invalidated')) {
-              console.debug('aiFiverr Background: Offscreen message error:', errorMsg);
-            } else {
-              console.warn('aiFiverr Background: Offscreen message error:', errorMsg);
-            }
-            reject(new Error(`Offscreen communication failed: ${errorMsg}`));
+            console.error('aiFiverr Background: Offscreen message error:', chrome.runtime.lastError.message);
+            reject(new Error(`Offscreen communication failed: ${chrome.runtime.lastError.message}`));
             return;
           }
 
@@ -474,24 +468,13 @@ async function handleGetKnowledgeBaseFiles(sendResponse) {
       throw new Error('Unable to obtain valid access token. Please sign out and sign in again.');
     }
 
-    // Get organized folder structure
-    const folderIds = await ensureOrganizedFolderStructure();
+    // Get aiFiverr folder ID
+    const folderId = await ensureAiFiverrFolder();
 
-    // Build search queries for all knowledge base folders
-    const knowledgeBaseFolders = [
-      await ensureAiFiverrFolder(), // Main aiFiverr folder (for backward compatibility)
-      folderIds.get('knowledge-base/text'),
-      folderIds.get('knowledge-base/video'),
-      folderIds.get('knowledge-base/audio'),
-      folderIds.get('knowledge-base/documents')
-    ].filter(Boolean); // Remove any undefined folder IDs
+    // Search for knowledge base files in the aiFiverr folder
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=parents in '${folderId}' and properties has {key='aiFiverr_type' and value='knowledge_base'} and trashed=false&fields=files(id,name,size,mimeType,createdTime,modifiedTime,webViewLink,properties)`;
 
-    const folderSearchQuery = knowledgeBaseFolders.map(id => `parents in '${id}'`).join(' or ');
-
-    // Search for knowledge base files in all organized folders
-    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=(${folderSearchQuery}) and trashed=false&fields=files(id,name,size,mimeType,createdTime,modifiedTime,webViewLink,properties)`;
-
-    console.log('🔍 Firebase Background: Searching for knowledge base files in organized folders:', knowledgeBaseFolders.length);
+    console.log('🔍 Firebase Background: Searching for knowledge base files in folder:', folderId);
 
     const response = await fetch(searchUrl, {
       headers: {
@@ -605,22 +588,11 @@ async function handleSearchDriveFiles(message, sendResponse) {
 
     const { query = '' } = message;
 
-    // Get organized folder structure
-    const folderIds = await ensureOrganizedFolderStructure();
+    // Get aiFiverr folder ID
+    const folderId = await ensureAiFiverrFolder();
 
-    // Build search queries for all knowledge base folders
-    const knowledgeBaseFolders = [
-      await ensureAiFiverrFolder(), // Main aiFiverr folder (for backward compatibility)
-      folderIds.get('knowledge-base/text'),
-      folderIds.get('knowledge-base/video'),
-      folderIds.get('knowledge-base/audio'),
-      folderIds.get('knowledge-base/documents')
-    ].filter(Boolean); // Remove any undefined folder IDs
-
-    const folderSearchQuery = knowledgeBaseFolders.map(id => `parents in '${id}'`).join(' or ');
-
-    // Build search query for organized folders
-    let searchQuery = `(${folderSearchQuery}) and trashed=false`;
+    // Build search query
+    let searchQuery = `parents in '${folderId}' and properties has {key='aiFiverr_type' and value='knowledge_base'} and trashed=false`;
 
     if (query.trim()) {
       // Add text search to the query
@@ -1292,28 +1264,16 @@ async function handleUploadFileToDrive(message, sendResponse) {
     }
     console.log(`📤 Firebase Background: Using MIME type '${detectedMimeType}' for file '${fileName}'`);
 
-    // Ensure organized folder structure exists
-    const folderIds = await ensureOrganizedFolderStructure();
+    // Ensure aiFiverr folder exists
+    const folderId = await ensureAiFiverrFolder();
 
-    // Determine appropriate subfolder based on file type
-    const subfolderPath = getSubfolderForFileType(detectedMimeType, fileName);
-    let targetFolderId = folderIds.get(subfolderPath);
-
-    if (!targetFolderId) {
-      console.warn(`📁 Firebase Background: Subfolder not found for ${subfolderPath}, using main folder`);
-      targetFolderId = await ensureAiFiverrFolder();
-    }
-
-    console.log(`📁 Firebase Background: Uploading to organized folder: ${subfolderPath} (${targetFolderId})`);
-
-    // Enhanced metadata with knowledge base specific properties and organized structure
+    // Enhanced metadata with knowledge base specific properties
     const metadata = {
       name: fileName,
       description: description || `aiFiverr Knowledge Base file uploaded on ${new Date().toISOString()}`,
-      parents: [targetFolderId],
+      parents: [folderId],
       properties: {
         'aiFiverr_type': 'knowledge_base',
-        'aiFiverr_category': subfolderPath.split('/').pop(), // text, video, audio, documents
         'aiFiverr_upload_date': new Date().toISOString(),
         'aiFiverr_file_size': file.size.toString(),
         'aiFiverr_mime_type': detectedMimeType,
@@ -1397,134 +1357,6 @@ function validateKnowledgeBaseFile(file) {
     valid: true,
     detectedMimeType: mimeType
   };
-}
-
-/**
- * Determine the appropriate subfolder based on file type
- */
-function getSubfolderForFileType(mimeType, fileName) {
-  const extension = fileName.toLowerCase().split('.').pop();
-
-  // Video files
-  if (mimeType.startsWith('video/') || ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm', 'mkv'].includes(extension)) {
-    return 'knowledge-base/video';
-  }
-
-  // Audio files
-  if (mimeType.startsWith('audio/') || ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a'].includes(extension)) {
-    return 'knowledge-base/audio';
-  }
-
-  // Document files (PDFs and other documents)
-  if (mimeType === 'application/pdf' ||
-      ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'rtf'].includes(extension)) {
-    return 'knowledge-base/documents';
-  }
-
-  // Text files (default for most knowledge base content)
-  return 'knowledge-base/text';
-}
-
-/**
- * Ensure organized folder structure exists in Google Drive
- */
-async function ensureOrganizedFolderStructure() {
-  try {
-    console.log('📁 Firebase Background: Ensuring organized folder structure...');
-
-    // First ensure main aiFiverr folder
-    const mainFolderId = await ensureAiFiverrFolder();
-
-    // Define the organized structure
-    const folderStructure = [
-      { path: 'knowledge-base', name: 'knowledge-base', parent: mainFolderId },
-      { path: 'knowledge-base/text', name: 'text', parent: null }, // Will be set after knowledge-base is created
-      { path: 'knowledge-base/video', name: 'video', parent: null },
-      { path: 'knowledge-base/audio', name: 'audio', parent: null },
-      { path: 'knowledge-base/documents', name: 'documents', parent: null },
-      { path: 'chat', name: 'chat', parent: mainFolderId }
-    ];
-
-    const folderIds = new Map();
-    folderIds.set('aiFiverr', mainFolderId);
-
-    // Create folders in order
-    for (const folder of folderStructure) {
-      const folderId = await ensureSubfolder(folder.name, folder.parent || folderIds.get('knowledge-base'));
-      folderIds.set(folder.path, folderId);
-
-      // Set parent for knowledge-base subfolders
-      if (folder.path === 'knowledge-base') {
-        folderStructure.forEach(f => {
-          if (f.path.startsWith('knowledge-base/') && f.parent === null) {
-            f.parent = folderId;
-          }
-        });
-      }
-    }
-
-    console.log('📁 Firebase Background: Organized folder structure created');
-    return folderIds;
-
-  } catch (error) {
-    console.error('❌ Firebase Background: Failed to create organized folder structure:', error);
-    throw error;
-  }
-}
-
-/**
- * Ensure a specific subfolder exists
- */
-async function ensureSubfolder(folderName, parentFolderId) {
-  try {
-    // Search for existing subfolder
-    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='${folderName}' and parents in '${parentFolderId}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-
-    const searchResponse = await fetch(searchUrl, {
-      headers: {
-        'Authorization': `Bearer ${authState.accessToken}`,
-        'Accept': 'application/json'
-      }
-    });
-
-    if (searchResponse.ok) {
-      const searchData = await searchResponse.json();
-      if (searchData.files && searchData.files.length > 0) {
-        console.log(`📁 Firebase Background: Found existing subfolder '${folderName}':`, searchData.files[0].id);
-        return searchData.files[0].id;
-      }
-    }
-
-    // Create subfolder
-    const createPayload = {
-      name: folderName,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [parentFolderId],
-      description: `aiFiverr Extension - ${folderName} folder`
-    };
-
-    const createResponse = await fetch('https://www.googleapis.com/drive/v3/files', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${authState.accessToken}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify(createPayload)
-    });
-
-    if (!createResponse.ok) {
-      throw new Error(`Failed to create subfolder '${folderName}': ${createResponse.status}`);
-    }
-
-    const createData = await createResponse.json();
-    console.log(`📁 Firebase Background: Created subfolder '${folderName}':`, createData.id);
-    return createData.id;
-
-  } catch (error) {
-    console.error(`❌ Firebase Background: Failed to ensure subfolder '${folderName}':`, error);
-    throw error;
-  }
 }
 
 // Ensure aiFiverr folder exists in Google Drive
