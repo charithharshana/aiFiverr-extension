@@ -31,16 +31,8 @@ class PopupManager {
       // Load initial data
       await this.loadDashboardData();
 
-      // Initialize Knowledge Base Files if on files tab
-      const activeTab = document.querySelector('.kb-tab-btn.active');
-      if (activeTab && activeTab.dataset.tab === 'files') {
-        await this.loadKnowledgeBaseFiles();
-      }
-
-      // Also initialize files data in background for faster switching
-      setTimeout(() => {
-        this.loadKnowledgeBaseFiles();
-      }, 1000);
+      // Knowledge base files will be loaded after authentication is confirmed
+      // No need to load files during initialization
     } catch (error) {
       console.error('Popup initialization failed:', error);
       // Remove popup error message - just log to console
@@ -3655,9 +3647,9 @@ class PopupManager {
     });
     document.getElementById(`${tabName}Tab`).classList.add('active');
 
-    // Load data for the active tab
+    // Load data for the active tab only if authenticated
     if (tabName === 'files') {
-      this.loadKnowledgeBaseFiles();
+      this.loadKnowledgeBaseFilesIfAuthenticated();
     }
   }
 
@@ -3698,8 +3690,6 @@ class PopupManager {
       let geminiReadyCount = 0;
       const totalFiles = fileArray.length;
 
-      this.showToast(`Starting upload of ${totalFiles} files...`, 'info');
-
       for (let i = 0; i < fileArray.length; i++) {
         const file = fileArray[i];
 
@@ -3711,8 +3701,6 @@ class PopupManager {
           const driveResult = await this.uploadFileToGoogleDrive(file);
           uploadedCount++;
 
-          this.showToast(`✅ ${file.name} uploaded to Google Drive`, 'success');
-
           // Phase 2: Upload to Gemini API for immediate use
           progressText.textContent = `Preparing ${file.name} for AI use... (${i + 1}/${totalFiles})`;
           progressFill.style.width = `${(i / totalFiles) * 50 + 25}%`;
@@ -3720,10 +3708,8 @@ class PopupManager {
           try {
             const geminiResult = await this.uploadFileToGeminiAPI(file);
             geminiReadyCount++;
-            this.showToast(`🤖 ${file.name} ready for AI use`, 'success');
           } catch (geminiError) {
             console.warn('Failed to upload to Gemini API:', geminiError);
-            this.showToast(`⚠️ ${file.name} uploaded but needs Gemini preparation`, 'warning');
           }
 
           // Phase 3: Update UI immediately after each file
@@ -3932,6 +3918,26 @@ class PopupManager {
     throw new Error('File processing timeout');
   }
 
+  /**
+   * Load knowledge base files only if authenticated
+   */
+  async loadKnowledgeBaseFilesIfAuthenticated() {
+    try {
+      const authResult = await this.checkGoogleAuth();
+      if (!authResult.success) {
+        console.log('aiFiverr Popup: Not authenticated, showing sign-in message');
+        this.displayKnowledgeBaseFilesError('Please sign in with Google to view files');
+        return;
+      }
+
+      // User is authenticated, proceed with loading files
+      await this.loadKnowledgeBaseFiles();
+    } catch (error) {
+      console.error('aiFiverr Popup: Failed to check authentication for file loading:', error);
+      this.displayKnowledgeBaseFilesError('Authentication check failed. Please try again.');
+    }
+  }
+
   async loadKnowledgeBaseFiles() {
     try {
       console.log('aiFiverr Popup: Loading knowledge base files...');
@@ -3972,17 +3978,12 @@ class PopupManager {
     try {
       console.log('aiFiverr Popup: Refreshing knowledge base files with real-time status updates...');
       this.showLoading(true);
-      this.showToast('Refreshing knowledge base...', 'info');
-
       // First load current files and immediately display them
       await this.loadKnowledgeBaseFiles();
 
       // Get current files to check for missing Gemini URIs
       const currentFiles = await this.getKnowledgeBaseFiles();
       console.log('aiFiverr Popup: Current files for status check:', currentFiles.length);
-
-      // Immediately show current status
-      this.showToast(`Found ${currentFiles.length} files, checking Gemini status...`, 'info');
 
       // Check for files without Gemini URIs and auto-upload them
       const filesToUpload = currentFiles.filter(file => !file.geminiUri);
@@ -3991,13 +3992,10 @@ class PopupManager {
       console.log('aiFiverr Popup: Files ready:', filesReady.length, 'Files to upload:', filesToUpload.length);
 
       if (filesToUpload.length > 0) {
-        this.showToast(`${filesReady.length} files ready, uploading ${filesToUpload.length} files to Gemini...`, 'info');
-
         let uploadedCount = 0;
         for (const file of filesToUpload) {
           try {
             console.log('aiFiverr Popup: Uploading file to Gemini:', file.name);
-            this.showToast(`Uploading ${file.name} (${uploadedCount + 1}/${filesToUpload.length})...`, 'info');
 
             await this.refreshGeminiFile(file.id);
             uploadedCount++;
@@ -4041,8 +4039,12 @@ class PopupManager {
     try {
       console.log('aiFiverr Popup: Starting auto-download of knowledge base files after authentication...');
 
-      // Show subtle loading indicator
-      this.showToast('Loading knowledge base files...', 'info');
+      // Verify authentication before attempting to load files
+      const authResult = await this.checkGoogleAuth();
+      if (!authResult.success) {
+        console.log('aiFiverr Popup: Not authenticated, skipping auto-download');
+        return;
+      }
 
       // Load knowledge base files from Google Drive
       await this.loadKnowledgeBaseFiles();
@@ -4057,7 +4059,6 @@ class PopupManager {
 
         if (filesToUpload.length > 0) {
           console.log('aiFiverr Popup: Auto-uploading', filesToUpload.length, 'files to Gemini...');
-          this.showToast(`Preparing ${filesToUpload.length} files for AI use...`, 'info');
 
           // Upload files to Gemini in background
           for (const file of filesToUpload) {
@@ -4513,8 +4514,6 @@ class PopupManager {
 
     try {
       this.showLoading(true);
-      this.showToast('Deleting file and cleaning up references...', 'info');
-
       // Get file details before deletion for cleanup
       const fileDetails = await this.getFileDetails(this.selectedFileId);
 
@@ -4544,8 +4543,6 @@ class PopupManager {
 
     try {
       this.showLoading(true);
-      this.showToast('Deleting file and cleaning up references...', 'info');
-
       // Get file details before deletion for cleanup
       const fileDetails = await this.getFileDetails(fileId);
 
@@ -4597,8 +4594,6 @@ class PopupManager {
   async refreshGeminiFile(fileId) {
     try {
       this.showLoading(true);
-      this.showToast('Refreshing Gemini file...', 'info');
-
       // Get file details from Google Drive
       const fileDetails = await this.getFileDetails(fileId);
 
@@ -4848,8 +4843,13 @@ class PopupManager {
     try {
       console.log('aiFiverr: Opening knowledge base file selector with enhanced sync...');
 
-      // Show loading indicator
-      this.showToast('Loading knowledge base files...', 'info');
+      // Check authentication before loading files
+      const authResult = await this.checkGoogleAuth();
+      if (!authResult.success) {
+        this.showToast('Please sign in with Google to access files', 'warning');
+        this.displayKbFileSelector([]);
+        return;
+      }
 
       // Force refresh of knowledge base files to ensure UI sync
       await this.loadKnowledgeBaseFiles();
@@ -5025,12 +5025,9 @@ class PopupManager {
           const filesToReupload = currentFiles.filter(file => !file.geminiUri);
 
           if (filesToReupload.length > 0) {
-            this.showToast(`Preparing ${filesToReupload.length} files for AI use...`, 'info');
-
             let uploadedCount = 0;
             for (const file of filesToReupload) {
               try {
-                this.showToast(`Preparing ${file.name} (${uploadedCount + 1}/${filesToReupload.length})...`, 'info');
                 await this.refreshGeminiFile(file.id);
                 uploadedCount++;
               } catch (error) {
@@ -5299,7 +5296,7 @@ class PopupManager {
       if (cleanedCount > 0) {
         await chrome.storage.local.set({ customPrompts });
         console.log(`aiFiverr: Cleaned file references from ${cleanedCount} prompts`);
-        this.showToast(`Removed file references from ${cleanedCount} prompts`, 'info');
+        console.log(`aiFiverr: Removed file references from ${cleanedCount} prompts`);
       } else {
         console.log('aiFiverr: No file references found in prompts to clean up');
       }

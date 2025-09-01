@@ -112,6 +112,45 @@ class GoogleDriveClient {
   }
 
   /**
+   * Ensure chat folder exists for Fiverr conversations
+   */
+  async ensureChatFolder() {
+    try {
+      // First ensure main aiFiverr folder
+      const mainFolderId = await this.ensureAiFiverrFolder();
+
+      // Search for existing chat folder
+      const searchResponse = await this.makeRequest(`/files?q=name='chat' and parents in '${mainFolderId}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+
+      if (searchResponse.files && searchResponse.files.length > 0) {
+        console.log('aiFiverr Drive: Found existing chat folder:', searchResponse.files[0].id);
+        return searchResponse.files[0].id;
+      }
+
+      // Create chat folder
+      const createResponse = await this.makeRequest('/files', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: 'chat',
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: [mainFolderId],
+          description: 'aiFiverr Extension - Fiverr Conversations'
+        })
+      });
+
+      console.log('aiFiverr Drive: Created chat folder:', createResponse.id);
+      return createResponse.id;
+
+    } catch (error) {
+      console.error('aiFiverr Drive: Failed to ensure chat folder:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Validate file for knowledge base upload
    */
   validateKnowledgeBaseFile(file) {
@@ -567,21 +606,29 @@ class GoogleDriveClient {
   }
 
   /**
-   * Save data to Google Drive as JSON file
+   * Save data to Google Drive as JSON file with organized folder structure
    */
   async saveDataFile(fileName, data, description = '') {
     try {
       console.log('aiFiverr Drive: Saving data file:', fileName);
 
-      // Ensure aiFiverr folder exists
-      const folderId = await this.ensureAiFiverrFolder();
+      // Determine target folder based on data type
+      let targetFolderId;
+      if (data.type === 'fiverr-conversation' || fileName.includes('fiverr-conversation')) {
+        // Use chat folder for Fiverr conversations
+        targetFolderId = await this.ensureChatFolder();
+        console.log('aiFiverr Drive: Saving conversation to chat folder:', targetFolderId);
+      } else {
+        // Use main aiFiverr folder for other data files
+        targetFolderId = await this.ensureAiFiverrFolder();
+      }
 
       // Convert data to JSON
       const jsonData = JSON.stringify(data, null, 2);
       const blob = new Blob([jsonData], { type: 'application/json' });
 
-      // Check if file already exists
-      const existingFiles = await this.makeRequest(`/files?q=name='${fileName}' and parents in '${folderId}' and trashed=false`);
+      // Check if file already exists in target folder
+      const existingFiles = await this.makeRequest(`/files?q=name='${fileName}' and parents in '${targetFolderId}' and trashed=false`);
 
       let fileId = null;
       if (existingFiles.files && existingFiles.files.length > 0) {
@@ -591,9 +638,9 @@ class GoogleDriveClient {
       const metadata = {
         name: fileName,
         description: description || `aiFiverr data file updated on ${new Date().toISOString()}`,
-        parents: [folderId],
+        parents: [targetFolderId],
         properties: {
-          'aiFiverr_type': 'data',
+          'aiFiverr_type': data.type === 'fiverr-conversation' ? 'conversation' : 'data',
           'aiFiverr_data_type': fileName.replace('.json', ''),
           'aiFiverr_upload_date': new Date().toISOString()
         }
