@@ -192,17 +192,19 @@ class GoogleAuthService {
             clearTimeout(timeout);
 
             if (chrome.runtime.lastError) {
-              console.error('aiFiverr Auth: Chrome runtime error:', chrome.runtime.lastError.message);
+              const errorMsg = chrome.runtime.lastError.message;
 
               // Handle specific Chrome runtime errors
-              if (chrome.runtime.lastError.message.includes('Receiving end does not exist')) {
+              if (errorMsg.includes('Receiving end does not exist')) {
+                console.debug('aiFiverr Auth: Connection error - receiving end does not exist');
                 reject(new Error('Could not establish connection. Receiving end does not exist.'));
-              } else if (chrome.runtime.lastError.message.includes('Extension context invalidated')) {
+              } else if (errorMsg.includes('Extension context invalidated')) {
                 // For context invalidation, don't retry - just log and continue
-                console.warn('aiFiverr Auth: Extension context invalidated - this is expected during extension updates');
+                console.debug('aiFiverr Auth: Extension context invalidated - this is expected during extension updates');
                 reject(new Error('Extension context invalidated'));
               } else {
-                reject(new Error(chrome.runtime.lastError.message));
+                console.warn('aiFiverr Auth: Chrome runtime error:', errorMsg);
+                reject(new Error(errorMsg));
               }
             } else {
               resolve(response);

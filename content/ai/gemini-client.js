@@ -222,16 +222,13 @@ class GeminiClient {
         const errorData = await response.json().catch(() => ({}));
         const errorMessage = errorData.error?.message || response.statusText;
 
-        // CRITICAL FIX: Handle stale file references (403 errors)
+        // Handle stale file references (403 errors)
         if (response.status === 403 && errorMessage.includes('You do not have permission to access the File')) {
           // Extract file ID from error message
           const fileIdMatch = errorMessage.match(/File (\w+)/);
           const fileId = fileIdMatch ? fileIdMatch[1] : 'unknown';
 
-          console.error('🚨 STALE FILE REFERENCE DETECTED:', fileId);
-          console.error('💡 This file no longer exists or you don\'t have permission to access it');
-          console.error('🔧 SOLUTION: Remove this file from your knowledge base and upload a fresh copy');
-
+          console.warn(`aiFiverr: Stale file reference detected: ${fileId}`);
           throw new Error(`Stale file reference detected (${fileId}). Please remove this file from your knowledge base and upload a fresh copy. The file may have expired or been deleted.`);
         }
 
@@ -405,16 +402,13 @@ class GeminiClient {
         const errorData = await response.json().catch(() => ({}));
         const errorMessage = errorData.error?.message || response.statusText;
 
-        // CRITICAL FIX: Handle stale file references (403 errors)
+        // Handle stale file references (403 errors)
         if (response.status === 403 && errorMessage.includes('You do not have permission to access the File')) {
           // Extract file ID from error message
           const fileIdMatch = errorMessage.match(/File (\w+)/);
           const fileId = fileIdMatch ? fileIdMatch[1] : 'unknown';
 
-          console.error('🚨 STALE FILE REFERENCE DETECTED:', fileId);
-          console.error('💡 This file no longer exists or you don\'t have permission to access it');
-          console.error('🔧 SOLUTION: Remove this file from your knowledge base and upload a fresh copy');
-
+          console.warn(`aiFiverr: Stale file reference detected: ${fileId}`);
           throw new Error(`Stale file reference detected (${fileId}). Please remove this file from your knowledge base and upload a fresh copy. The file may have expired or been deleted.`);
         }
 

@@ -115,8 +115,8 @@ class PopupManager {
       this.toggleFileUploadArea();
     });
 
-    document.getElementById('refreshKbFiles')?.addEventListener('click', () => {
-      this.loadKnowledgeBaseFiles();
+    document.getElementById('refreshKbFiles')?.addEventListener('click', async () => {
+      await this.refreshKnowledgeBaseFiles();
     });
 
     document.getElementById('fileInput')?.addEventListener('change', (e) => {
@@ -3939,6 +3939,49 @@ class PopupManager {
     }
   }
 
+  async refreshKnowledgeBaseFiles() {
+    try {
+      console.log('aiFiverr Popup: Refreshing knowledge base files with auto-upload...');
+      this.showLoading(true);
+
+      // First load current files
+      await this.loadKnowledgeBaseFiles();
+
+      // Get current files to check for missing Gemini URIs
+      const currentFiles = await this.getKnowledgeBaseFiles();
+      console.log('aiFiverr Popup: Current files for auto-upload check:', currentFiles.length);
+
+      // Check for files without Gemini URIs and auto-upload them
+      const filesToUpload = currentFiles.filter(file => !file.geminiUri);
+      console.log('aiFiverr Popup: Files without Gemini URI found:', filesToUpload.length);
+
+      if (filesToUpload.length > 0) {
+        this.showToast(`Auto-uploading ${filesToUpload.length} files to Gemini...`, 'info');
+
+        for (const file of filesToUpload) {
+          try {
+            console.log('aiFiverr Popup: Auto-uploading file to Gemini:', file.name);
+            await this.refreshGeminiFile(file.id);
+          } catch (error) {
+            console.warn(`aiFiverr Popup: Failed to auto-upload ${file.name}:`, error);
+          }
+        }
+
+        // Reload files after auto-upload
+        await this.loadKnowledgeBaseFiles();
+        this.showToast(`Successfully auto-uploaded ${filesToUpload.length} files to Gemini`, 'success');
+      } else {
+        this.showToast('All files are already uploaded to Gemini', 'success');
+      }
+
+    } catch (error) {
+      console.error('aiFiverr Popup: Failed to refresh knowledge base files:', error);
+      this.showToast('Failed to refresh knowledge base files', 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
   async getGoogleDriveFiles() {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({
@@ -4369,6 +4412,8 @@ class PopupManager {
       this.showToast('File deleted successfully', 'success');
       this.hideFileDetailModal();
       await this.loadKnowledgeBaseFiles();
+      // Refresh any open file selectors to reflect deletion
+      this.refreshOpenFileSelectors();
     } catch (error) {
       console.error('Delete failed:', error);
       this.showToast('Failed to delete file', 'error');
@@ -4385,6 +4430,8 @@ class PopupManager {
       await this.deleteFile(fileId);
       this.showToast('File deleted successfully', 'success');
       await this.loadKnowledgeBaseFiles(); // Refresh the file list
+      // Refresh any open file selectors to reflect deletion
+      this.refreshOpenFileSelectors();
     } catch (error) {
       console.error('Failed to delete file:', error);
       this.showToast(`Failed to delete file: ${error.message}`, 'error');
@@ -4674,9 +4721,12 @@ class PopupManager {
     try {
       console.log('aiFiverr: Opening knowledge base file selector...');
 
-      // Get knowledge base files
+      // Force refresh of knowledge base files to ensure UI sync
+      await this.loadKnowledgeBaseFiles();
+
+      // Get fresh knowledge base files
       const files = await this.getKnowledgeBaseFiles();
-      console.log('aiFiverr: Retrieved files:', files);
+      console.log('aiFiverr: Retrieved fresh files for selector:', files.length);
 
       // Always show the modal, even if no files
       this.displayKbFileSelector(files || []);
@@ -5011,6 +5061,54 @@ class PopupManager {
         icon: fileIcon
       };
     });
+  }
+
+  /**
+   * Refresh any open file selector modals to reflect file changes
+   */
+  async refreshOpenFileSelectors() {
+    try {
+      const openSelector = document.querySelector('.kb-file-selector-overlay');
+      if (openSelector) {
+        console.log('aiFiverr: Refreshing open file selector after file deletion...');
+
+        // Get fresh files
+        const freshFiles = await this.getKnowledgeBaseFiles();
+
+        // Update the file list in the modal
+        const fileList = openSelector.querySelector('.kb-file-selector-list');
+        if (fileList) {
+          fileList.innerHTML = freshFiles.length > 0 ? freshFiles.map(file => `
+            <div class="kb-file-selector-item" data-file-id="${file.id}">
+              <label class="kb-file-checkbox-label">
+                <input type="checkbox" class="kb-file-checkbox" value="${file.id}">
+                <div class="kb-file-item-content">
+                  <div class="kb-file-icon">${this.getFileIcon(file.mimeType)}</div>
+                  <div class="kb-file-info">
+                    <div class="kb-file-name">${file.name}</div>
+                    <div class="kb-file-meta">${this.formatFileSize(file.size)} • ${file.mimeType}</div>
+                    ${file.geminiUri ? `<div class="kb-file-gemini-uri" title="Gemini URI: ${file.geminiUri}">🔗 ${file.geminiUri.split('/').pop()}</div>` : '<div class="kb-file-no-uri">⚠️ No Gemini URI - click refresh to upload</div>'}
+                  </div>
+                  <div class="kb-file-status">
+                    <span class="status-indicator ${this.getFileConnectionStatus(file)}" title="Gemini Status: ${this.getFileConnectionStatus(file)}"></span>
+                  </div>
+                </div>
+              </label>
+            </div>
+          `).join('') : `
+            <div class="kb-files-empty">
+              <div class="kb-files-empty-icon">📁</div>
+              <h4>No files available</h4>
+              <p>Upload files to your knowledge base first.<br>Go to Settings → Knowledge Base → Files tab to upload files.</p>
+            </div>
+          `;
+
+          console.log('aiFiverr: File selector refreshed with', freshFiles.length, 'files');
+        }
+      }
+    } catch (error) {
+      console.error('aiFiverr: Failed to refresh open file selectors:', error);
+    }
   }
 
   getFileIcon(mimeType) {

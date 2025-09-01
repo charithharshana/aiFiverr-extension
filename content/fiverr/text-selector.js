@@ -2021,7 +2021,7 @@ class TextSelector {
         // Check if StreamingChatbox is available
         if (typeof window.StreamingChatbox === 'undefined') {
           console.error('aiFiverr: StreamingChatbox not available, keeping popup open');
-          this.showToast('Streaming chat not available. Please try again.');
+          this.showErrorMessage('Streaming chat not available. Please try again.');
           return;
         }
 
@@ -2034,7 +2034,7 @@ class TextSelector {
         }
       } catch (error) {
         console.error('aiFiverr: Error opening streaming chatbox:', error);
-        this.showToast('Error opening chat. Please try again.');
+        this.showErrorMessage('Error opening chat. Please try again.');
       }
     });
     } else {

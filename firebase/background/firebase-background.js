@@ -82,8 +82,14 @@ async function sendMessageToOffscreen(message) {
           clearTimeout(timeout);
 
           if (chrome.runtime.lastError) {
-            console.error('aiFiverr Background: Offscreen message error:', chrome.runtime.lastError.message);
-            reject(new Error(`Offscreen communication failed: ${chrome.runtime.lastError.message}`));
+            const errorMsg = chrome.runtime.lastError.message;
+            // Use debug level for common connection errors
+            if (errorMsg.includes('Receiving end does not exist') || errorMsg.includes('Extension context invalidated')) {
+              console.debug('aiFiverr Background: Offscreen message error:', errorMsg);
+            } else {
+              console.warn('aiFiverr Background: Offscreen message error:', errorMsg);
+            }
+            reject(new Error(`Offscreen communication failed: ${errorMsg}`));
             return;
           }
 

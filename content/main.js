@@ -595,20 +595,27 @@ class AiFiverrMain {
     try {
       // Check if extension context is still valid
       if (!chrome.runtime?.id) {
-        console.warn('aiFiverr: Extension context invalidated, cannot send message');
+        console.debug('aiFiverr: Extension context invalidated, cannot send message');
+        if (callback) callback(null, new Error('Extension context invalidated'));
         return;
       }
 
       chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime.lastError) {
-          console.warn('aiFiverr: Background message error:', chrome.runtime.lastError.message);
+          // Only log connection errors at debug level to reduce console noise
+          const errorMsg = chrome.runtime.lastError.message;
+          if (errorMsg.includes('Receiving end does not exist') || errorMsg.includes('Extension context invalidated')) {
+            console.debug('aiFiverr: Background message error:', errorMsg);
+          } else {
+            console.warn('aiFiverr: Background message error:', errorMsg);
+          }
           if (callback) callback(null, chrome.runtime.lastError);
         } else {
           if (callback) callback(response, null);
         }
       });
     } catch (error) {
-      console.warn('aiFiverr: Failed to send message to background:', error.message);
+      console.debug('aiFiverr: Failed to send message to background:', error.message);
       if (callback) callback(null, error);
     }
   }

@@ -1191,7 +1191,7 @@ class KnowledgeBaseManager {
    */
   async cleanupStaleFileReferences() {
     try {
-      console.log('🧹 aiFiverr KB: Cleaning up stale file references...');
+      console.debug('aiFiverr KB: Cleaning up stale file references...');
 
       // Get current valid files from Gemini API
       const geminiResponse = await this.sendMessageWithRetry({
@@ -1199,14 +1199,14 @@ class KnowledgeBaseManager {
       }, 2);
 
       if (!geminiResponse.success) {
-        console.warn('⚠️ aiFiverr KB: Could not get Gemini files for cleanup:', geminiResponse.error);
+        console.debug('aiFiverr KB: Could not get Gemini files for cleanup:', geminiResponse.error);
         return false;
       }
 
       const validGeminiFiles = geminiResponse.data || [];
       const validGeminiUris = new Set(validGeminiFiles.map(f => f.uri));
 
-      console.log(`📊 aiFiverr KB: Found ${validGeminiFiles.length} valid files in Gemini API`);
+      console.debug(`aiFiverr KB: Found ${validGeminiFiles.length} valid files in Gemini API`);
 
       // Check local files for stale references
       let cleanedCount = 0;
@@ -1214,7 +1214,7 @@ class KnowledgeBaseManager {
 
       for (const [key, fileRef] of this.files.entries()) {
         if (fileRef.geminiUri && !validGeminiUris.has(fileRef.geminiUri)) {
-          console.warn(`🚨 aiFiverr KB: Stale file reference detected: ${fileRef.name} (${fileRef.geminiUri})`);
+          console.debug(`aiFiverr KB: Stale file reference detected: ${fileRef.name}`);
           filesToRemove.push(key);
           cleanedCount++;
         }
@@ -1223,21 +1223,21 @@ class KnowledgeBaseManager {
       // Remove stale references
       for (const key of filesToRemove) {
         this.files.delete(key);
-        console.log(`🗑️ aiFiverr KB: Removed stale file reference: ${key}`);
+        console.debug(`aiFiverr KB: Removed stale file reference: ${key}`);
       }
 
       if (cleanedCount > 0) {
         // Save updated file list
-        await this.saveFiles();
-        console.log(`✅ aiFiverr KB: Cleaned up ${cleanedCount} stale file references`);
+        await this.saveKnowledgeBaseFiles();
+        console.debug(`aiFiverr KB: Cleaned up ${cleanedCount} stale file references`);
       } else {
-        console.log('✅ aiFiverr KB: No stale file references found');
+        console.debug('aiFiverr KB: No stale file references found');
       }
 
       return true;
 
     } catch (error) {
-      console.error('❌ aiFiverr KB: Failed to cleanup stale file references:', error);
+      console.debug('aiFiverr KB: Failed to cleanup stale file references:', error.message);
       return false;
     }
   }
@@ -1358,15 +1358,11 @@ class KnowledgeBaseManager {
         console.log('aiFiverr KB: Returning upload response:', response);
         return response;
       } else {
-        console.error('aiFiverr KB: Failed to upload file to Gemini:', {
-          success: response?.success,
-          error: response?.error,
-          hasData: !!response?.data
-        });
+        console.warn('aiFiverr KB: Failed to upload file to Gemini:', response?.error || 'Upload failed - no response data');
         return { success: false, error: response?.error || 'Upload failed - no response data' };
       }
     } catch (error) {
-      console.error('aiFiverr KB: Error in uploadFileToGemini:', error);
+      console.warn('aiFiverr KB: Error in uploadFileToGemini:', error.message);
       return { success: false, error: error.message };
     }
   }
@@ -1505,7 +1501,7 @@ class KnowledgeBaseManager {
           }
 
         } catch (accessError) {
-          console.warn('aiFiverr KB: Error checking file accessibility:', file.name, accessError);
+          console.debug('aiFiverr KB: Error checking file accessibility:', file.name, accessError.message);
           inaccessibleFiles.push(file);
         }
       }
@@ -1550,7 +1546,7 @@ class KnowledgeBaseManager {
     } catch (error) {
       // Only log if it's not a timeout or abort error
       if (error.name !== 'AbortError') {
-        console.warn('aiFiverr KB: File accessibility check failed:', file.name, error.message);
+        console.debug('aiFiverr KB: File accessibility check failed:', file.name, error.message);
       }
       return false;
     }
