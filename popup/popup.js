@@ -4944,7 +4944,12 @@ class PopupManager {
       const fileIcon = fileItem.querySelector('.kb-file-icon').textContent;
       const fileId = checkbox.value;
 
-      // CRITICAL FIX: Find and include full file data with geminiUri
+      // CRITICAL FIX: Get the geminiUri from the DOM element directly
+      const geminiUriElement = fileItem.querySelector('.kb-file-gemini-uri');
+      const geminiUri = geminiUriElement ?
+        geminiUriElement.getAttribute('title').replace('Gemini URI: ', '') : null;
+
+      // Also try to find full file data from knowledgeBaseFiles
       let fullFileData = null;
       if (this.knowledgeBaseFiles && Array.isArray(this.knowledgeBaseFiles)) {
         fullFileData = this.knowledgeBaseFiles.find(file =>
@@ -4954,26 +4959,31 @@ class PopupManager {
         );
       }
 
-      // Store full file data if available, otherwise store basic info
-      if (fullFileData && fullFileData.geminiUri) {
-        console.log('aiFiverr: Attaching file with full data:', fileName, 'geminiUri:', fullFileData.geminiUri);
+      // Use the geminiUri from DOM or fullFileData
+      const finalGeminiUri = geminiUri || (fullFileData && fullFileData.geminiUri);
+      const finalMimeType = (fullFileData && fullFileData.mimeType) ||
+        fileMeta.split(' • ')[1] || 'text/plain';
+
+      if (finalGeminiUri) {
+        console.log('aiFiverr: Attaching file with geminiUri:', fileName, 'URI:', finalGeminiUri);
         selectedFiles.push({
-          id: fullFileData.id || fullFileData.driveFileId || fileId,
-          driveFileId: fullFileData.driveFileId || fullFileData.id || fileId,
-          name: fullFileData.name || fileName,
-          mimeType: fullFileData.mimeType,
-          geminiUri: fullFileData.geminiUri,
-          size: fullFileData.size,
+          id: fullFileData ? (fullFileData.id || fullFileData.driveFileId || fileId) : fileId,
+          driveFileId: fullFileData ? (fullFileData.driveFileId || fullFileData.id || fileId) : fileId,
+          name: fullFileData ? fullFileData.name : fileName,
+          mimeType: finalMimeType,
+          geminiUri: finalGeminiUri,
+          size: fullFileData ? fullFileData.size : null,
           meta: fileMeta,
           icon: fileIcon
         });
       } else {
-        console.warn('aiFiverr: Attaching file with basic data only (no geminiUri):', fileName);
+        console.warn('aiFiverr: File missing geminiUri, cannot attach for API use:', fileName);
         selectedFiles.push({
           id: fileId,
           name: fileName,
           meta: fileMeta,
-          icon: fileIcon
+          icon: fileIcon,
+          error: 'Missing geminiUri - file not uploaded to Gemini'
         });
       }
     });
@@ -5011,7 +5021,7 @@ class PopupManager {
             <span class="selected-file-icon">${file.icon || '📄'}</span>
             <span class="selected-file-name">${file.name}</span>
             <span class="selected-file-size">${file.meta || (file.size ? this.formatFileSize(file.size) : 'Unknown size')}</span>
-            ${file.geminiUri ? '<span class="file-ready-indicator" title="Ready for AI">✅</span>' : '<span class="file-not-ready-indicator" title="Not uploaded to Gemini">⚠️</span>'}
+            ${file.geminiUri ? '<span class="file-ready-indicator" title="Ready for AI - Has Gemini URI">✅ Ready</span>' : (file.error ? '<span class="file-error-indicator" title="' + file.error + '">❌ Error</span>' : '<span class="file-not-ready-indicator" title="Not uploaded to Gemini">⚠️ Not Ready</span>')}
           </div>
           <button class="remove-selected-file" data-file-id="${primaryId}">×</button>
         </div>
@@ -5067,8 +5077,12 @@ class PopupManager {
       const fileMeta = item.querySelector('.selected-file-size').textContent;
       const fileIcon = item.querySelector('.selected-file-icon').textContent;
 
-      // CRITICAL FIX: Try to get full file data with geminiUri from knowledgeBaseFiles
-      // This ensures that when prompts are saved, they include all necessary file data for API calls
+      // CRITICAL FIX: Get geminiUri from data attributes or knowledgeBaseFiles
+      const geminiUri = item.dataset.geminiUri;
+      const mimeType = item.dataset.mimeType;
+      const fileSize = item.dataset.fileSize;
+
+      // Also try to get full file data from knowledgeBaseFiles as backup
       let fullFileData = null;
       if (this.knowledgeBaseFiles && Array.isArray(this.knowledgeBaseFiles)) {
         fullFileData = this.knowledgeBaseFiles.find(file =>
@@ -5078,26 +5092,31 @@ class PopupManager {
         );
       }
 
-      // If we found full file data, use it; otherwise fall back to basic info
-      if (fullFileData && fullFileData.geminiUri) {
-        console.log('aiFiverr Popup: Found full file data for prompt attachment:', fileName, 'with geminiUri');
+      // Use data attributes first, then fallback to fullFileData
+      const finalGeminiUri = geminiUri || (fullFileData && fullFileData.geminiUri);
+      const finalMimeType = mimeType || (fullFileData && fullFileData.mimeType);
+      const finalSize = fileSize || (fullFileData && fullFileData.size);
+
+      if (finalGeminiUri) {
+        console.log('aiFiverr Popup: Found complete file data for prompt attachment:', fileName, 'with geminiUri');
         return {
-          id: fullFileData.id || fullFileData.driveFileId || fileId,
-          driveFileId: fullFileData.driveFileId || fullFileData.id || fileId,
-          name: fullFileData.name || fileName,
-          mimeType: fullFileData.mimeType,
-          geminiUri: fullFileData.geminiUri,
-          size: fullFileData.size,
+          id: fullFileData ? (fullFileData.id || fullFileData.driveFileId || fileId) : fileId,
+          driveFileId: fullFileData ? (fullFileData.driveFileId || fullFileData.id || fileId) : fileId,
+          name: fullFileData ? fullFileData.name : fileName,
+          mimeType: finalMimeType,
+          geminiUri: finalGeminiUri,
+          size: finalSize,
           meta: fileMeta,
           icon: fileIcon
         };
       } else {
-        console.warn('aiFiverr Popup: Could not find full file data for:', fileName, 'saving basic info only');
+        console.warn('aiFiverr Popup: File missing geminiUri, saving basic info only:', fileName);
         return {
           id: fileId,
           name: fileName,
           meta: fileMeta,
-          icon: fileIcon
+          icon: fileIcon,
+          error: 'Missing geminiUri - file not uploaded to Gemini'
         };
       }
     });
