@@ -3410,6 +3410,49 @@ body {
 .kb-files-empty p {
   font-size: 13px;
   line-height: 1.4;
+  margin-bottom: 20px;
+}
+
+/* Authentication and retry buttons */
+.kb-auth-btn,
+.kb-retry-btn {
+  background: #1dbf73;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+  margin-top: 16px;
+}
+
+.kb-auth-btn:hover,
+.kb-retry-btn:hover {
+  background: #17a85e;
+  transform: translateY(-1px);
+}
+
+.kb-auth-btn:active,
+.kb-retry-btn:active {
+  transform: translateY(0);
+}
+
+.kb-retry-btn {
+  background: #007bff;
+}
+
+.kb-retry-btn:hover {
+  background: #0056b3;
+}
+
+.kb-auth-icon,
+.kb-retry-icon {
+  font-size: 16px;
 }
 
 /* Final border consistency fixes */

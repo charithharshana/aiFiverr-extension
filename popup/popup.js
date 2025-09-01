@@ -31,15 +31,19 @@ class PopupManager {
       // Load initial data
       await this.loadDashboardData();
 
-      // Initialize Knowledge Base Files if on files tab
+      // Initialize Knowledge Base Files if on files tab and user is authenticated
       const activeTab = document.querySelector('.kb-tab-btn.active');
       if (activeTab && activeTab.dataset.tab === 'files') {
-        await this.loadKnowledgeBaseFiles();
+        await this.loadKnowledgeBaseFilesWithAuthCheck();
       }
 
-      // Also initialize files data in background for faster switching
-      setTimeout(() => {
-        this.loadKnowledgeBaseFiles();
+      // Don't automatically load files in background on fresh install
+      // Only load if user has previously authenticated
+      setTimeout(async () => {
+        const authStatus = await this.checkGoogleAuth();
+        if (authStatus.success) {
+          this.loadKnowledgeBaseFiles();
+        }
       }, 1000);
     } catch (error) {
       console.error('Popup initialization failed:', error);
@@ -116,7 +120,7 @@ class PopupManager {
     });
 
     document.getElementById('refreshKbFiles')?.addEventListener('click', () => {
-      this.loadKnowledgeBaseFiles();
+      this.loadKnowledgeBaseFilesWithAuthCheck();
     });
 
     document.getElementById('fileInput')?.addEventListener('change', (e) => {
@@ -3654,7 +3658,7 @@ class PopupManager {
 
     // Load data for the active tab
     if (tabName === 'files') {
-      this.loadKnowledgeBaseFiles();
+      this.loadKnowledgeBaseFilesWithAuthCheck();
     }
   }
 
@@ -3906,6 +3910,25 @@ class PopupManager {
     throw new Error('File processing timeout');
   }
 
+  /**
+   * Load knowledge base files with authentication check and graceful error handling
+   */
+  async loadKnowledgeBaseFilesWithAuthCheck() {
+    try {
+      const authResult = await this.checkGoogleAuth();
+
+      if (!authResult.success) {
+        this.displayKnowledgeBaseAuthPrompt();
+        return;
+      }
+
+      await this.loadKnowledgeBaseFiles();
+    } catch (error) {
+      console.error('aiFiverr Popup: Failed to load knowledge base files with auth check:', error);
+      this.displayKnowledgeBaseAuthPrompt();
+    }
+  }
+
   async loadKnowledgeBaseFiles() {
     try {
       // Only log if debugging is enabled
@@ -3916,7 +3939,7 @@ class PopupManager {
       const authResult = await this.checkGoogleAuth();
 
       if (!authResult.success) {
-        this.displayKnowledgeBaseFilesError('Please sign in with Google to view files');
+        this.displayKnowledgeBaseAuthPrompt();
         return;
       }
 
@@ -3939,7 +3962,15 @@ class PopupManager {
 
     } catch (error) {
       console.error('aiFiverr Popup: Failed to load knowledge base files:', error);
-      this.displayKnowledgeBaseFilesError(error.message);
+
+      // Check if this is an authentication error
+      if (error.message.includes('Authentication required') ||
+          error.message.includes('Please sign in') ||
+          error.message.includes('auth')) {
+        this.displayKnowledgeBaseAuthPrompt();
+      } else {
+        this.displayKnowledgeBaseFilesError(error.message);
+      }
     }
   }
 
@@ -4064,6 +4095,24 @@ class PopupManager {
     }).join('');
   }
 
+  /**
+   * Display authentication prompt instead of error for unauthenticated users
+   */
+  displayKnowledgeBaseAuthPrompt() {
+    const container = document.getElementById('kbFilesList');
+    container.innerHTML = `
+      <div class="kb-files-empty">
+        <div class="kb-files-empty-icon">🔐</div>
+        <h4>Sign in to access Knowledge Base</h4>
+        <p>Connect your Google account to upload, manage, and use knowledge base files with AI assistance.</p>
+        <button class="kb-auth-btn" onclick="window.aiFiverrPopup.handleSignIn()">
+          <span class="kb-auth-icon">🔗</span>
+          Sign in with Google
+        </button>
+      </div>
+    `;
+  }
+
   displayKnowledgeBaseFilesError(message) {
     const container = document.getElementById('kbFilesList');
     container.innerHTML = `
@@ -4071,6 +4120,10 @@ class PopupManager {
         <div class="kb-files-empty-icon">⚠️</div>
         <h4>Unable to load files</h4>
         <p>${message}</p>
+        <button class="kb-retry-btn" onclick="window.aiFiverrPopup.loadKnowledgeBaseFiles()">
+          <span class="kb-retry-icon">🔄</span>
+          Try Again
+        </button>
       </div>
     `;
   }
