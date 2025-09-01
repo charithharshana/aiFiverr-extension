@@ -3198,6 +3198,9 @@ class PopupManager {
           isAuthenticated: response.isAuthenticated,
           user: response.user
         });
+
+        // Trigger auto-download if user is already authenticated (popup opened)
+        await this.autoDownloadKnowledgeBaseFiles();
       } else {
         this.updateAuthUI({ isAuthenticated: false });
       }
@@ -3316,6 +3319,9 @@ class PopupManager {
       if (response && response.success) {
         this.showToast('Successfully signed in!', 'success');
         await this.checkAuthStatus();
+
+        // Trigger auto-download of knowledge base files after successful authentication
+        await this.autoDownloadKnowledgeBaseFiles();
       } else {
         // Check if this is an Edge compatibility issue
         if (response?.isEdgeCompatibilityIssue) {
@@ -3689,46 +3695,69 @@ class PopupManager {
       }
 
       let uploadedCount = 0;
+      let geminiReadyCount = 0;
       const totalFiles = fileArray.length;
+
+      this.showToast(`Starting upload of ${totalFiles} files...`, 'info');
 
       for (let i = 0; i < fileArray.length; i++) {
         const file = fileArray[i];
 
         try {
-          progressText.textContent = `Uploading ${file.name}... (${i + 1}/${totalFiles})`;
-          progressFill.style.width = `${(i / totalFiles) * 100}%`;
+          // Phase 1: Upload to Google Drive
+          progressText.textContent = `Uploading ${file.name} to Google Drive... (${i + 1}/${totalFiles})`;
+          progressFill.style.width = `${(i / totalFiles) * 50}%`;
 
-          // Upload to Google Drive
-          const result = await this.uploadFileToGoogleDrive(file);
+          const driveResult = await this.uploadFileToGoogleDrive(file);
           uploadedCount++;
 
-          // Also upload to Gemini Files API for immediate use
+          this.showToast(`✅ ${file.name} uploaded to Google Drive`, 'success');
+
+          // Phase 2: Upload to Gemini API for immediate use
+          progressText.textContent = `Preparing ${file.name} for AI use... (${i + 1}/${totalFiles})`;
+          progressFill.style.width = `${(i / totalFiles) * 50 + 25}%`;
+
           try {
-            await this.uploadFileToGeminiAPI(file);
+            const geminiResult = await this.uploadFileToGeminiAPI(file);
+            geminiReadyCount++;
+            this.showToast(`🤖 ${file.name} ready for AI use`, 'success');
           } catch (geminiError) {
             console.warn('Failed to upload to Gemini API:', geminiError);
-            // Continue even if Gemini upload fails
+            this.showToast(`⚠️ ${file.name} uploaded but needs Gemini preparation`, 'warning');
           }
+
+          // Phase 3: Update UI immediately after each file
+          progressText.textContent = `Updating file list... (${i + 1}/${totalFiles})`;
+          progressFill.style.width = `${((i + 1) / totalFiles) * 100}%`;
+
+          // Refresh file list to show immediate status
+          await this.loadKnowledgeBaseFiles();
 
         } catch (error) {
           console.error(`Failed to upload ${file.name}:`, error);
-          this.showToast(`Failed to upload ${file.name}: ${error.message}`, 'error');
+          this.showToast(`❌ Failed to upload ${file.name}: ${error.message}`, 'error');
         }
       }
 
       // Complete
       progressFill.style.width = '100%';
-      progressText.textContent = `Upload complete! ${uploadedCount}/${totalFiles} files uploaded.`;
+      progressText.textContent = `Upload complete! ${uploadedCount}/${totalFiles} files uploaded, ${geminiReadyCount} ready for AI.`;
 
       if (uploadedCount > 0) {
-        this.showToast(`Successfully uploaded ${uploadedCount} file(s)`, 'success');
+        const statusMessage = geminiReadyCount === uploadedCount
+          ? `🎉 All ${uploadedCount} files uploaded and ready for AI use!`
+          : `📁 ${uploadedCount} files uploaded, ${geminiReadyCount} ready for AI use. Use refresh to prepare remaining files.`;
+
+        this.showToast(statusMessage, geminiReadyCount === uploadedCount ? 'success' : 'warning');
+
+        // Final refresh to ensure UI is up to date
         await this.loadKnowledgeBaseFiles();
       }
 
       // Hide upload area after a delay
       setTimeout(() => {
         this.toggleFileUploadArea();
-      }, 2000);
+      }, 3000);
 
     } catch (error) {
       console.error('File upload error:', error);
@@ -3941,37 +3970,60 @@ class PopupManager {
 
   async refreshKnowledgeBaseFiles() {
     try {
-      console.log('aiFiverr Popup: Refreshing knowledge base files with auto-upload...');
+      console.log('aiFiverr Popup: Refreshing knowledge base files with real-time status updates...');
       this.showLoading(true);
+      this.showToast('Refreshing knowledge base...', 'info');
 
-      // First load current files
+      // First load current files and immediately display them
       await this.loadKnowledgeBaseFiles();
 
       // Get current files to check for missing Gemini URIs
       const currentFiles = await this.getKnowledgeBaseFiles();
-      console.log('aiFiverr Popup: Current files for auto-upload check:', currentFiles.length);
+      console.log('aiFiverr Popup: Current files for status check:', currentFiles.length);
+
+      // Immediately show current status
+      this.showToast(`Found ${currentFiles.length} files, checking Gemini status...`, 'info');
 
       // Check for files without Gemini URIs and auto-upload them
       const filesToUpload = currentFiles.filter(file => !file.geminiUri);
-      console.log('aiFiverr Popup: Files without Gemini URI found:', filesToUpload.length);
+      const filesReady = currentFiles.filter(file => file.geminiUri);
+
+      console.log('aiFiverr Popup: Files ready:', filesReady.length, 'Files to upload:', filesToUpload.length);
 
       if (filesToUpload.length > 0) {
-        this.showToast(`Auto-uploading ${filesToUpload.length} files to Gemini...`, 'info');
+        this.showToast(`${filesReady.length} files ready, uploading ${filesToUpload.length} files to Gemini...`, 'info');
 
+        let uploadedCount = 0;
         for (const file of filesToUpload) {
           try {
-            console.log('aiFiverr Popup: Auto-uploading file to Gemini:', file.name);
+            console.log('aiFiverr Popup: Uploading file to Gemini:', file.name);
+            this.showToast(`Uploading ${file.name} (${uploadedCount + 1}/${filesToUpload.length})...`, 'info');
+
             await this.refreshGeminiFile(file.id);
+            uploadedCount++;
+
+            // Update display immediately after each upload
+            await this.loadKnowledgeBaseFiles();
+
           } catch (error) {
-            console.warn(`aiFiverr Popup: Failed to auto-upload ${file.name}:`, error);
+            console.warn(`aiFiverr Popup: Failed to upload ${file.name}:`, error);
+            this.showToast(`Failed to upload ${file.name}: ${error.message}`, 'error');
           }
         }
 
-        // Reload files after auto-upload
+        // Final reload and status update
         await this.loadKnowledgeBaseFiles();
-        this.showToast(`Successfully auto-uploaded ${filesToUpload.length} files to Gemini`, 'success');
+        const finalFiles = await this.getKnowledgeBaseFiles();
+        const finalReady = finalFiles.filter(file => file.geminiUri);
+        const finalPending = finalFiles.filter(file => !file.geminiUri);
+
+        if (finalPending.length === 0) {
+          this.showToast(`✅ All ${finalReady.length} files ready for AI use`, 'success');
+        } else {
+          this.showToast(`⚠️ ${finalReady.length} files ready, ${finalPending.length} files need attention`, 'warning');
+        }
       } else {
-        this.showToast('All files are already uploaded to Gemini', 'success');
+        this.showToast(`✅ All ${filesReady.length} files are ready for AI use`, 'success');
       }
 
     } catch (error) {
@@ -3979,6 +4031,58 @@ class PopupManager {
       this.showToast('Failed to refresh knowledge base files', 'error');
     } finally {
       this.showLoading(false);
+    }
+  }
+
+  /**
+   * Auto-download all knowledge base files from Google Drive after authentication
+   */
+  async autoDownloadKnowledgeBaseFiles() {
+    try {
+      console.log('aiFiverr Popup: Starting auto-download of knowledge base files after authentication...');
+
+      // Show subtle loading indicator
+      this.showToast('Loading knowledge base files...', 'info');
+
+      // Load knowledge base files from Google Drive
+      await this.loadKnowledgeBaseFiles();
+
+      // Get the loaded files
+      const files = await this.getKnowledgeBaseFiles();
+      console.log('aiFiverr Popup: Auto-downloaded files from Google Drive:', files.length);
+
+      if (files.length > 0) {
+        // Check which files need Gemini upload
+        const filesToUpload = files.filter(file => !file.geminiUri);
+
+        if (filesToUpload.length > 0) {
+          console.log('aiFiverr Popup: Auto-uploading', filesToUpload.length, 'files to Gemini...');
+          this.showToast(`Preparing ${filesToUpload.length} files for AI use...`, 'info');
+
+          // Upload files to Gemini in background
+          for (const file of filesToUpload) {
+            try {
+              await this.refreshGeminiFile(file.id);
+              console.log('aiFiverr Popup: Auto-uploaded to Gemini:', file.name);
+            } catch (error) {
+              console.warn(`aiFiverr Popup: Failed to auto-upload ${file.name}:`, error);
+            }
+          }
+
+          // Reload to show updated status
+          await this.loadKnowledgeBaseFiles();
+          this.showToast(`Knowledge base ready with ${files.length} files`, 'success');
+        } else {
+          this.showToast(`Knowledge base loaded with ${files.length} files`, 'success');
+        }
+      } else {
+        console.log('aiFiverr Popup: No knowledge base files found in Google Drive');
+      }
+
+    } catch (error) {
+      console.error('aiFiverr Popup: Failed to auto-download knowledge base files:', error);
+      // Don't show error toast for auto-download to avoid interrupting user experience
+      console.warn('aiFiverr Popup: Auto-download failed silently, user can manually refresh if needed');
     }
   }
 
@@ -4403,13 +4507,24 @@ class PopupManager {
   async deleteSelectedFile() {
     if (!this.selectedFileId) return;
 
-    if (!confirm('Are you sure you want to delete this file? This action cannot be undone.')) {
+    if (!confirm('Are you sure you want to delete this file? This action cannot be undone and will remove all references from prompts.')) {
       return;
     }
 
     try {
+      this.showLoading(true);
+      this.showToast('Deleting file and cleaning up references...', 'info');
+
+      // Get file details before deletion for cleanup
+      const fileDetails = await this.getFileDetails(this.selectedFileId);
+
+      // Delete file from Google Drive and Gemini
       await this.deleteFile(this.selectedFileId);
-      this.showToast('File deleted successfully', 'success');
+
+      // Clean up file references from prompts
+      await this.cleanupFileReferencesFromPrompts(fileDetails.name);
+
+      this.showToast('File deleted and references cleaned up successfully', 'success');
       this.hideFileDetailModal();
       await this.loadKnowledgeBaseFiles();
       // Refresh any open file selectors to reflect deletion
@@ -4417,18 +4532,30 @@ class PopupManager {
     } catch (error) {
       console.error('Delete failed:', error);
       this.showToast('Failed to delete file', 'error');
+    } finally {
+      this.showLoading(false);
     }
   }
 
   async handleDeleteFile(fileId) {
-    if (!confirm('Are you sure you want to delete this file? This action cannot be undone.')) {
+    if (!confirm('Are you sure you want to delete this file? This action cannot be undone and will remove all references from prompts.')) {
       return;
     }
 
     try {
       this.showLoading(true);
+      this.showToast('Deleting file and cleaning up references...', 'info');
+
+      // Get file details before deletion for cleanup
+      const fileDetails = await this.getFileDetails(fileId);
+
+      // Delete file from Google Drive and Gemini
       await this.deleteFile(fileId);
-      this.showToast('File deleted successfully', 'success');
+
+      // Clean up file references from prompts
+      await this.cleanupFileReferencesFromPrompts(fileDetails.name);
+
+      this.showToast('File deleted and references cleaned up successfully', 'success');
       await this.loadKnowledgeBaseFiles(); // Refresh the file list
       // Refresh any open file selectors to reflect deletion
       this.refreshOpenFileSelectors();
@@ -4719,14 +4846,28 @@ class PopupManager {
 
   async showKnowledgeBaseFileSelector() {
     try {
-      console.log('aiFiverr: Opening knowledge base file selector...');
+      console.log('aiFiverr: Opening knowledge base file selector with enhanced sync...');
+
+      // Show loading indicator
+      this.showToast('Loading knowledge base files...', 'info');
 
       // Force refresh of knowledge base files to ensure UI sync
       await this.loadKnowledgeBaseFiles();
 
-      // Get fresh knowledge base files
+      // Get fresh knowledge base files with real-time status
       const files = await this.getKnowledgeBaseFiles();
       console.log('aiFiverr: Retrieved fresh files for selector:', files.length);
+
+      // Check file status and provide immediate feedback
+      const readyFiles = files.filter(file => file.geminiUri);
+      const pendingFiles = files.filter(file => !file.geminiUri);
+
+      if (files.length > 0) {
+        const statusMessage = pendingFiles.length === 0
+          ? `✅ All ${readyFiles.length} files ready for AI use`
+          : `📊 ${readyFiles.length} files ready, ${pendingFiles.length} need preparation`;
+        this.showToast(statusMessage, pendingFiles.length === 0 ? 'success' : 'warning');
+      }
 
       // Always show the modal, even if no files
       this.displayKbFileSelector(files || []);
@@ -4884,19 +5025,25 @@ class PopupManager {
           const filesToReupload = currentFiles.filter(file => !file.geminiUri);
 
           if (filesToReupload.length > 0) {
-            this.showToast(`Re-uploading ${filesToReupload.length} files to Gemini...`, 'info');
+            this.showToast(`Preparing ${filesToReupload.length} files for AI use...`, 'info');
 
+            let uploadedCount = 0;
             for (const file of filesToReupload) {
               try {
+                this.showToast(`Preparing ${file.name} (${uploadedCount + 1}/${filesToReupload.length})...`, 'info');
                 await this.refreshGeminiFile(file.id);
+                uploadedCount++;
               } catch (error) {
-                console.warn(`Failed to re-upload ${file.name}:`, error);
+                console.warn(`Failed to prepare ${file.name}:`, error);
+                this.showToast(`⚠️ Failed to prepare ${file.name}`, 'warning');
               }
             }
           }
 
-          // Get refreshed files after re-upload
+          // Get refreshed files after re-upload with status check
           const refreshedFiles = await this.getKnowledgeBaseFiles();
+          const finalReady = refreshedFiles.filter(file => file.geminiUri);
+          const finalPending = refreshedFiles.filter(file => !file.geminiUri);
           // Update the file list in the modal
           const fileList = overlay.querySelector('.kb-file-selector-list');
           fileList.innerHTML = refreshedFiles.length > 0 ? refreshedFiles.map(file => `
@@ -4908,10 +5055,10 @@ class PopupManager {
                   <div class="kb-file-info">
                     <div class="kb-file-name">${file.name}</div>
                     <div class="kb-file-meta">${this.formatFileSize(file.size)} • ${file.mimeType}</div>
-                    ${file.geminiUri ? `<div class="kb-file-gemini-uri" title="Gemini URI: ${file.geminiUri}">🔗 ${file.geminiUri.split('/').pop()}</div>` : '<div class="kb-file-no-uri">⚠️ No Gemini URI - click refresh to upload</div>'}
+                    ${file.geminiUri ? `<div class="kb-file-gemini-uri" title="Gemini URI: ${file.geminiUri}">🔗 Ready for AI use</div>` : '<div class="kb-file-no-uri">⚠️ Needs preparation - click refresh</div>'}
                   </div>
                   <div class="kb-file-status">
-                    <span class="status-indicator ${this.getFileConnectionStatus(file)}" title="Gemini Status: ${this.getFileConnectionStatus(file)}"></span>
+                    <span class="status-indicator ${this.getFileConnectionStatus(file)}" title="Gemini Status: ${file.geminiUri ? 'Ready' : 'Needs preparation'}"></span>
                   </div>
                 </div>
               </label>
@@ -4933,7 +5080,16 @@ class PopupManager {
             });
           });
 
-          this.showToast('Files refreshed successfully', 'success');
+          // Provide comprehensive status feedback
+          if (finalPending.length === 0 && finalReady.length > 0) {
+            this.showToast(`✅ All ${finalReady.length} files ready for AI use`, 'success');
+          } else if (finalReady.length > 0) {
+            this.showToast(`📊 ${finalReady.length} files ready, ${finalPending.length} still need preparation`, 'warning');
+          } else if (refreshedFiles.length > 0) {
+            this.showToast('⚠️ No files are ready for AI use. Check your API keys and try again.', 'warning');
+          } else {
+            this.showToast('Files refreshed successfully', 'success');
+          }
         } catch (error) {
           console.error('Failed to refresh files:', error);
           this.showToast('Failed to refresh files', 'error');
@@ -5108,6 +5264,64 @@ class PopupManager {
       }
     } catch (error) {
       console.error('aiFiverr: Failed to refresh open file selectors:', error);
+    }
+  }
+
+  /**
+   * Clean up file references from all prompts when a file is deleted
+   */
+  async cleanupFileReferencesFromPrompts(fileName) {
+    try {
+      console.log('aiFiverr: Cleaning up file references for:', fileName);
+
+      // Get all custom prompts
+      const result = await chrome.storage.local.get('customPrompts');
+      const customPrompts = result.customPrompts || {};
+
+      let cleanedCount = 0;
+      const filePattern = new RegExp(`\\{\\{file:${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}\\}`, 'gi');
+
+      // Clean up each prompt
+      for (const [promptKey, prompt] of Object.entries(customPrompts)) {
+        if (prompt.content && filePattern.test(prompt.content)) {
+          // Remove file references from prompt content
+          const originalContent = prompt.content;
+          prompt.content = prompt.content.replace(filePattern, '').replace(/\s+/g, ' ').trim();
+
+          if (originalContent !== prompt.content) {
+            cleanedCount++;
+            console.log(`aiFiverr: Cleaned file reference from prompt: ${prompt.name}`);
+          }
+        }
+      }
+
+      // Save updated prompts if any were cleaned
+      if (cleanedCount > 0) {
+        await chrome.storage.local.set({ customPrompts });
+        console.log(`aiFiverr: Cleaned file references from ${cleanedCount} prompts`);
+        this.showToast(`Removed file references from ${cleanedCount} prompts`, 'info');
+      } else {
+        console.log('aiFiverr: No file references found in prompts to clean up');
+      }
+
+      // Also notify content scripts to remove file from any active attachments
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs[0]) {
+          chrome.tabs.sendMessage(tabs[0].id, {
+            type: 'REMOVE_FILE_FROM_ATTACHMENTS',
+            fileName: fileName
+          }).catch(() => {
+            // Ignore errors if content script is not available
+          });
+        }
+      } catch (error) {
+        // Ignore tab messaging errors
+      }
+
+    } catch (error) {
+      console.error('aiFiverr: Failed to cleanup file references from prompts:', error);
+      // Don't throw error to avoid interrupting deletion process
     }
   }
 
