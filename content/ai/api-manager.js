@@ -51,8 +51,15 @@ class APIKeyManager {
   async saveKeyHealth() {
     try {
       // Check if storage manager is available and extension context is valid
-      if (!window.storageManager || !window.storageManager.isExtensionContextValid()) {
-        console.warn('aiFiverr: Cannot save key health - storage unavailable or context invalidated');
+      if (!window.storageManager) {
+        if (window.aiFiverrDebug) {
+          console.warn('aiFiverr: Storage manager not available for key health save');
+        }
+        return;
+      }
+
+      if (!window.storageManager.isExtensionContextValid()) {
+        // Silently skip save if context is invalid - this is normal during extension reload
         return;
       }
 
@@ -63,13 +70,17 @@ class APIKeyManager {
             healthData[index] = health;
           }
         } catch (error) {
-          console.warn(`aiFiverr: Error processing key health for index ${index}:`, error);
+          if (window.aiFiverrDebug) {
+            console.warn(`aiFiverr: Error processing key health for index ${index}:`, error);
+          }
         }
       });
 
       await storageManager.set({ keyHealth: healthData });
     } catch (error) {
-      console.error('aiFiverr: Failed to save key health:', error);
+      if (window.aiFiverrDebug) {
+        console.error('aiFiverr: Failed to save key health:', error);
+      }
     }
   }
 

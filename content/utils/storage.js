@@ -16,9 +16,9 @@ class StorageManager {
    */
   isExtensionContextValid() {
     const now = Date.now();
-    // Only check context every 5 seconds to avoid spam
-    if (now - this.lastContextCheck < 5000 && this.contextInvalidated) {
-      return false;
+    // Only check context every 10 seconds to reduce overhead
+    if (now - this.lastContextCheck < 10000 && this.contextInvalidated !== null) {
+      return !this.contextInvalidated;
     }
 
     this.lastContextCheck = now;
@@ -26,17 +26,27 @@ class StorageManager {
     // More robust context validation
     let isValid = false;
     try {
-      isValid = !!(chrome?.runtime?.id && chrome?.storage?.local);
+      // Check if chrome APIs are available and functional
+      isValid = !!(chrome?.runtime?.id && chrome?.storage?.local && typeof chrome.storage.local.get === 'function');
+
+      // Additional check - try to access runtime ID
+      if (isValid) {
+        const runtimeId = chrome.runtime.id;
+        isValid = !!runtimeId;
+      }
     } catch (error) {
       // Context is definitely invalid if we can't even access chrome APIs
       isValid = false;
     }
 
-    if (!isValid && !this.contextInvalidated) {
+    // Only log context invalidation once to reduce console spam
+    if (!isValid && this.contextInvalidated !== true) {
       this.contextInvalidated = true;
-      console.warn('aiFiverr: Extension context invalidated - storage operations will be limited');
+      if (window.aiFiverrDebug) {
+        console.warn('aiFiverr: Extension context invalidated - storage operations will use cache only');
+      }
 
-      // Notify other components about context invalidation
+      // Notify other components about context invalidation (throttled)
       try {
         if (typeof window !== 'undefined' && window.dispatchEvent) {
           window.dispatchEvent(new CustomEvent('extensionContextInvalidated', {
@@ -45,6 +55,12 @@ class StorageManager {
         }
       } catch (error) {
         // Silently fail if we can't dispatch events
+      }
+    } else if (isValid && this.contextInvalidated === true) {
+      // Context has been restored
+      this.contextInvalidated = false;
+      if (window.aiFiverrDebug) {
+        console.log('aiFiverr: Extension context restored');
       }
     }
 

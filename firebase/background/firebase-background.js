@@ -1264,21 +1264,26 @@ async function handleUploadFileToDrive(message, sendResponse) {
     }
     console.log(`📤 Firebase Background: Using MIME type '${detectedMimeType}' for file '${fileName}'`);
 
-    // Ensure aiFiverr folder exists
-    const folderId = await ensureAiFiverrFolder();
+    // Determine appropriate folder based on file type using organized structure
+    const folderPath = getFileTypeFolder(fileName, detectedMimeType);
+    console.log(`📁 Firebase Background: File '${fileName}' will be uploaded to: ${folderPath}`);
+
+    // Get the target folder ID for the organized structure
+    const targetFolderId = await getFolderIdForPath(folderPath);
 
     // Enhanced metadata with knowledge base specific properties
     const metadata = {
       name: fileName,
       description: description || `aiFiverr Knowledge Base file uploaded on ${new Date().toISOString()}`,
-      parents: [folderId],
+      parents: [targetFolderId],
       properties: {
         'aiFiverr_type': 'knowledge_base',
         'aiFiverr_upload_date': new Date().toISOString(),
         'aiFiverr_file_size': file.size.toString(),
         'aiFiverr_mime_type': detectedMimeType,
         'aiFiverr_original_mime_type': file.type || 'unknown',
-        'aiFiverr_tags': tags.join(',')
+        'aiFiverr_tags': tags.join(','),
+        'aiFiverr_folder_path': folderPath
       }
     };
 
@@ -1357,6 +1362,114 @@ function validateKnowledgeBaseFile(file) {
     valid: true,
     detectedMimeType: mimeType
   };
+}
+
+// Define organized folder structure
+const folderStructure = {
+  'knowledge-base': {
+    'text': ['txt', 'md', 'docx', 'doc', 'rtf'],
+    'video': ['mp4', 'avi', 'mov', 'wmv', 'flv', 'webm'],
+    'audio': ['mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a'],
+    'documents': ['pdf', 'ppt', 'pptx', 'xls', 'xlsx']
+  },
+  'chat': [] // For Fiverr conversation files
+};
+
+// Cache for subfolder IDs
+let subfolderIds = {};
+
+// Determine the appropriate folder for a file based on its type
+function getFileTypeFolder(fileName, mimeType) {
+  const extension = fileName.split('.').pop()?.toLowerCase();
+
+  // Check each category and subcategory
+  for (const [categoryName, subcategories] of Object.entries(folderStructure)) {
+    if (typeof subcategories === 'object' && !Array.isArray(subcategories)) {
+      for (const [subcategoryName, extensions] of Object.entries(subcategories)) {
+        if (extensions.includes(extension)) {
+          return `${categoryName}/${subcategoryName}`;
+        }
+      }
+    }
+  }
+
+  // Default to knowledge-base/documents for unknown types
+  return 'knowledge-base/documents';
+}
+
+// Get folder ID for a specific file type path
+async function getFolderIdForPath(folderPath) {
+  const pathParts = folderPath.split('/');
+  let currentFolderId = await ensureAiFiverrFolder();
+
+  for (const folderName of pathParts) {
+    currentFolderId = await ensureSubfolder(folderName, currentFolderId);
+  }
+
+  return currentFolderId;
+}
+
+// Ensure a subfolder exists within a parent folder
+async function ensureSubfolder(folderName, parentFolderId) {
+  try {
+    const cacheKey = `${parentFolderId}/${folderName}`;
+
+    // Check cache first
+    if (subfolderIds[cacheKey]) {
+      return subfolderIds[cacheKey];
+    }
+
+    // Search for existing subfolder
+    const searchResponse = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=name='${folderName}' and parents in '${parentFolderId}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      {
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!searchResponse.ok) {
+      throw new Error(`Failed to search for subfolder: ${searchResponse.status}`);
+    }
+
+    const searchData = await searchResponse.json();
+
+    if (searchData.files && searchData.files.length > 0) {
+      const folderId = searchData.files[0].id;
+      subfolderIds[cacheKey] = folderId;
+      return folderId;
+    }
+
+    // Create new subfolder
+    const createResponse = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: folderName,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentFolderId]
+      })
+    });
+
+    if (!createResponse.ok) {
+      throw new Error(`Failed to create subfolder: ${createResponse.status}`);
+    }
+
+    const createData = await createResponse.json();
+    const folderId = createData.id;
+    subfolderIds[cacheKey] = folderId;
+    console.log(`📁 Firebase Background: Created subfolder '${folderName}':`, folderId);
+    return folderId;
+
+  } catch (error) {
+    console.error(`❌ Firebase Background: Failed to ensure subfolder '${folderName}':`, error);
+    throw error;
+  }
 }
 
 // Ensure aiFiverr folder exists in Google Drive
@@ -1481,10 +1594,10 @@ async function ensureAiFiverrFolder() {
   }
 }
 
-// Upload file to Google Drive
+// Upload file to Google Drive with organized folder structure
 async function uploadFileToGoogleDrive(file, metadata, detectedMimeType) {
   try {
-    console.log('📤 Firebase Background: Starting Google Drive upload...');
+    console.log('📤 Firebase Background: Starting Google Drive upload with organized folders...');
     console.log('📄 Firebase Background: File details:', {
       name: file.name,
       originalType: file.type,
@@ -1498,6 +1611,15 @@ async function uploadFileToGoogleDrive(file, metadata, detectedMimeType) {
     // Never use application/octet-stream - always fall back to text/plain
     if (mimeType === 'application/octet-stream') {
       mimeType = 'text/plain';
+    }
+
+    // The metadata already contains the correct folder ID from the organized structure
+    console.log(`📁 Firebase Background: Uploading to organized folder (ID: ${metadata.parents[0]})`);
+    console.log(`📁 Firebase Background: Folder path: ${metadata.properties?.aiFiverr_folder_path || 'unknown'}`);
+
+    // Validate that we have a valid folder ID
+    if (!metadata.parents || !metadata.parents[0]) {
+      throw new Error('No target folder ID specified in metadata');
     }
 
     // Convert file data to proper format

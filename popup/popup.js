@@ -3309,8 +3309,9 @@ class PopupManager {
     try {
       this.showLoading(true);
 
+      // Use Firebase authentication to match the background service
       const response = await chrome.runtime.sendMessage({
-        type: 'GOOGLE_AUTH_START'
+        type: 'FIREBASE_AUTH_START'
       });
 
       if (response && response.success) {
@@ -3337,8 +3338,9 @@ class PopupManager {
     try {
       this.showLoading(true);
 
+      // Use Firebase authentication to match the background service
       const response = await chrome.runtime.sendMessage({
-        type: 'GOOGLE_AUTH_SIGNOUT'
+        type: 'FIREBASE_AUTH_SIGNOUT'
       });
 
       if (response && response.success) {
