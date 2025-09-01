@@ -131,17 +131,88 @@ async function resetSelectionCounter() {
   console.log('🔄 Firebase Background: Selection counter reset');
 }
 
-// Initialize
+// Extension lifecycle handlers
+chrome.runtime.onStartup.addListener(async () => {
+  console.log('🚀 Firebase Background: Extension startup - reloading auth state');
+  await loadAuthState();
+});
+
+chrome.runtime.onInstalled.addListener(async (details) => {
+  console.log('🔧 Firebase Background: Extension installed/updated - initializing auth state');
+  await loadAuthState();
+
+  if (details.reason === 'install') {
+    console.log('🎉 Firebase Background: First time installation');
+  } else if (details.reason === 'update') {
+    console.log('🔄 Firebase Background: Extension updated from version', details.previousVersion);
+  }
+});
+
+// Keep-alive mechanism to prevent service worker from going inactive
+let keepAliveInterval;
+
+function startKeepAlive() {
+  // Clear any existing interval
+  if (keepAliveInterval) {
+    clearInterval(keepAliveInterval);
+  }
+
+  // Ping every 20 seconds to keep service worker alive
+  keepAliveInterval = setInterval(() => {
+    console.log('🔄 Firebase Background: Keep-alive ping');
+  }, 20000);
+}
+
+function stopKeepAlive() {
+  if (keepAliveInterval) {
+    clearInterval(keepAliveInterval);
+    keepAliveInterval = null;
+  }
+}
+
+// Start keep-alive on initialization
+startKeepAlive();
+
+// Initialize on script load
 loadAuthState();
 
-// Message handler
+// Enhanced message handler with better error handling
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('📨 Firebase Background: Received message:', message.type);
+
+  // Ensure we always send a response to prevent "Receiving end does not exist" errors
+  let responseHandled = false;
+
+  const safeResponse = (response) => {
+    if (!responseHandled) {
+      responseHandled = true;
+      try {
+        sendResponse(response);
+      } catch (error) {
+        console.warn('Firebase Background: Failed to send response:', error.message);
+      }
+    }
+  };
+
+  // Set a timeout to ensure response is sent even if handler fails
+  const responseTimeout = setTimeout(() => {
+    if (!responseHandled) {
+      console.warn('Firebase Background: Handler timeout for message:', message.type);
+      safeResponse({ success: false, error: 'Handler timeout' });
+    }
+  }, 30000); // 30 second timeout
+
+  const clearResponseTimeout = () => {
+    if (responseTimeout) {
+      clearTimeout(responseTimeout);
+    }
+  };
 
   switch (message.type) {
     case 'PING':
       console.log('🏓 Firebase Background: Responding to PING');
-      sendResponse({
+      clearResponseTimeout();
+      safeResponse({
         success: true,
         message: 'PONG from Firebase Background',
         timestamp: Date.now(),
@@ -152,19 +223,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'GOOGLE_AUTH_START':
     case 'FIREBASE_AUTH_START':
       console.log('🔐 Firebase Background: Handling auth start (type: ' + message.type + ')');
-      handleFirebaseAuthStart(sendResponse);
+      handleFirebaseAuthStart((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'GOOGLE_AUTH_SIGNOUT':
     case 'FIREBASE_AUTH_SIGNOUT':
       console.log('🚪 Firebase Background: Handling sign out (type: ' + message.type + ')');
-      handleFirebaseSignOut(sendResponse);
+      handleFirebaseSignOut((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'GOOGLE_AUTH_STATUS':
     case 'FIREBASE_AUTH_STATUS':
       console.log('📊 Firebase Background: Handling auth status (type: ' + message.type + ')');
-      sendResponse({
+      clearResponseTimeout();
+      safeResponse({
         success: true,
         isAuthenticated: authState.isAuthenticated,
         user: authState.userInfo,
@@ -174,96 +252,142 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'FIREBASE_STORE_USER_DATA':
       console.log('💾 Firebase Background: Storing user data');
-      handleStoreUserData(message.userData, sendResponse);
+      handleStoreUserData(message.userData, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'FIREBASE_AUTH_REFRESH_TOKEN':
       console.log('🔄 Firebase Background: Refreshing token');
-      handleRefreshToken(sendResponse);
+      handleRefreshToken((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'FIREBASE_AUTH_VALIDATE_TOKEN':
     case 'GOOGLE_AUTH_TOKEN':
       console.log('✅ Firebase Background: Validating token (type: ' + message.type + ')');
-      handleValidateToken(sendResponse);
+      handleValidateToken((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'GET_KNOWLEDGE_BASE_FILES':
     case 'GET_DRIVE_FILES': // Legacy compatibility
       console.log('📁 Firebase Background: Getting knowledge base files (type: ' + message.type + ')');
-      handleGetKnowledgeBaseFiles(sendResponse);
+      handleGetKnowledgeBaseFiles((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'UPLOAD_FILE_TO_GEMINI':
       console.log('📤 Firebase Background: Uploading file to Gemini');
-      handleUploadFileToGemini(message, sendResponse);
+      handleUploadFileToGemini(message, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'GET_GEMINI_FILES':
       console.log('📋 Firebase Background: Getting Gemini files');
-      handleGetGeminiFiles(sendResponse);
+      handleGetGeminiFiles((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'UPLOAD_FILE_TO_DRIVE':
       console.log('📤 Firebase Background: Uploading file to Drive');
-      handleUploadFileToDrive(message, sendResponse);
+      handleUploadFileToDrive(message, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'SEARCH_DRIVE_FILES':
       console.log('🔍 Firebase Background: Searching Drive files');
-      handleSearchDriveFiles(message, sendResponse);
+      handleSearchDriveFiles(message, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'DELETE_DRIVE_FILE':
       console.log('🗑️ Firebase Background: Deleting Drive file');
-      handleDeleteDriveFile(message, sendResponse);
+      handleDeleteDriveFile(message, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'GET_FILE_DETAILS':
       console.log('📄 Firebase Background: Getting file details');
-      handleGetFileDetails(message, sendResponse);
+      handleGetFileDetails(message, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'UPDATE_FILE_METADATA':
       console.log('✏️ Firebase Background: Updating file metadata');
-      handleUpdateFileMetadata(message, sendResponse);
+      handleUpdateFileMetadata(message, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'DOWNLOAD_DRIVE_FILE':
       console.log('⬇️ Firebase Background: Downloading Drive file');
-      handleDownloadDriveFile(message, sendResponse);
+      handleDownloadDriveFile(message, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'UPDATE_API_KEYS':
       console.log('🔑 Firebase Background: Updating API keys');
-      handleUpdateApiKeys(message, sendResponse);
+      handleUpdateApiKeys(message, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'GET_API_KEY':
       console.log('🔑 Firebase Background: Getting API key');
-      handleGetApiKey(sendResponse);
+      handleGetApiKey((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
       return true; // Async response
 
     case 'INCREMENT_SELECTION_COUNTER':
       console.log('➕ Firebase Background: Incrementing selection counter');
       incrementSelectionCounter();
-      sendResponse({ success: true, counter: selectionCounter });
+      clearResponseTimeout();
+      safeResponse({ success: true, counter: selectionCounter });
       return false; // Sync response
 
     case 'RESET_SELECTION_COUNTER':
       console.log('🔄 Firebase Background: Resetting selection counter');
       resetSelectionCounter();
-      sendResponse({ success: true, counter: selectionCounter });
+      clearResponseTimeout();
+      safeResponse({ success: true, counter: selectionCounter });
       return false; // Sync response
 
     case 'GET_SELECTION_COUNTER':
       console.log('🔢 Firebase Background: Getting selection counter');
-      sendResponse({ success: true, counter: selectionCounter });
+      clearResponseTimeout();
+      safeResponse({ success: true, counter: selectionCounter });
       return false; // Sync response
 
     default:
       console.log('❓ Firebase Background: Unknown message type:', message.type);
-      sendResponse({ success: false, error: 'Unknown message type: ' + message.type });
+      clearResponseTimeout();
+      safeResponse({ success: false, error: 'Unknown message type: ' + message.type });
       return false;
   }
 });
