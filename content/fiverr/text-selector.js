@@ -1614,41 +1614,39 @@ class TextSelector {
       // OPTIMIZED: Use smart file attachment based on prompt analysis
       console.log('aiFiverr: Knowledge base files from prompt processing:', knowledgeBaseFiles.length, 'files');
 
-      // If no files specified in prompt, determine appropriate fallback behavior
+      // CRITICAL FIX: If no files specified in prompt, include all available knowledge base files
+      // This ensures floating icon has access to knowledge base files like other components
       if (knowledgeBaseFiles.length === 0 && window.knowledgeBaseManager) {
         try {
-          // Check if this is a prompt that should load all files (like AUTO_LOAD_ALL behavior)
-          // This happens when prompt processing failed and we're in fallback mode
-          const shouldLoadAllFiles = !window.variableProcessor ||
-                                   (result && typeof result === 'object' && result.knowledgeBaseFiles && result.knowledgeBaseFiles.length === 0);
+          console.log('aiFiverr: No files from variable processor, attempting to load all available knowledge base files');
 
-          const fileOptions = {
-            manuallySelectedFiles: null,
-            promptReferencedFiles: null,
-            enableSmartSelection: true,
-            promptText: processedPrompt,
-            fallbackToAll: shouldLoadAllFiles // Load all files if prompt processing failed or for default prompts
-          };
+          // For floating icon, we should include all available knowledge base files
+          // This matches the behavior of other components like popup and streaming chatbox
+          knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFiles();
 
-          knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFilesOptimized(fileOptions);
+          console.log('aiFiverr: Loaded all available knowledge base files:', knowledgeBaseFiles.length, 'files');
 
-          if (shouldLoadAllFiles && knowledgeBaseFiles.length === 0) {
-            // If optimized method didn't return files but we should load all, use original method
-            console.log('aiFiverr: Optimized method returned no files, trying original getKnowledgeBaseFiles()');
-            knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFiles();
+          // If the main method didn't work, try the optimized method as fallback
+          if (knowledgeBaseFiles.length === 0) {
+            console.log('aiFiverr: Main method returned no files, trying optimized method');
+
+            const fileOptions = {
+              manuallySelectedFiles: null,
+              promptReferencedFiles: null,
+              enableSmartSelection: true,
+              promptText: processedPrompt,
+              fallbackToAll: true // Load all files as fallback
+            };
+
+            knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFilesOptimized(fileOptions);
+            console.log('aiFiverr: Optimized method found', knowledgeBaseFiles.length, 'files');
           }
 
-          console.log('aiFiverr: Smart file selection found', knowledgeBaseFiles.length, 'relevant files');
         } catch (error) {
-          console.warn('aiFiverr: Smart file selection failed:', error);
+          console.warn('aiFiverr: Failed to load knowledge base files:', error);
 
-          // Final fallback: try to get all available files
-          try {
-            knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFiles();
-            console.log('aiFiverr: Fallback to original method found', knowledgeBaseFiles.length, 'files');
-          } catch (fallbackError) {
-            console.error('aiFiverr: All file retrieval methods failed:', fallbackError);
-          }
+          // Final fallback: empty array
+          knowledgeBaseFiles = [];
         }
       }
 
