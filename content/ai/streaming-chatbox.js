@@ -31,28 +31,40 @@ class StreamingChatbox {
     this.originalVariableUsage = null; // Stores which variables were used in original prompt
     this.manuallyAttachedFiles = []; // Stores manually attached files
 
-    // Initialize asynchronously to handle file validation
-    this.init().catch(error => {
-      console.error('aiFiverr StreamingChatbox: Failed to initialize:', error);
+    // Initialize synchronously for critical components, async for file validation
+    this.initSync();
+    this.initAsync().catch(error => {
+      console.error('aiFiverr StreamingChatbox: Failed to initialize async components:', error);
     });
   }
 
   /**
-   * Initialize the chatbox
+   * Initialize critical components synchronously
    */
-  async init() {
+  initSync() {
     try {
       this.createChatboxElement();
       this.setupEventListeners();
       this.initializeMarkdownRenderer();
+      this.hide(); // Start hidden
+      console.log('aiFiverr StreamingChatbox: Synchronous initialization complete');
+    } catch (error) {
+      console.error('aiFiverr StreamingChatbox: Error during synchronous initialization:', error);
+      throw error;
+    }
+  }
 
+  /**
+   * Initialize async components (file validation, etc.)
+   */
+  async initAsync() {
+    try {
       // Proactively validate and clean up any stale file references
       await this.initializeFileValidation();
-
-      this.hide(); // Start hidden
+      console.log('aiFiverr StreamingChatbox: Asynchronous initialization complete');
     } catch (error) {
-      console.error('aiFiverr StreamingChatbox: Error during initialization:', error);
-      throw error;
+      console.error('aiFiverr StreamingChatbox: Error during asynchronous initialization:', error);
+      // Don't throw - this shouldn't prevent the chatbox from working
     }
   }
 
@@ -698,8 +710,26 @@ class StreamingChatbox {
    * Show the chatbox
    */
   show(initialMessage = null) {
+    console.log('👁️ StreamingChatbox: show() called');
+
+    if (!this.chatboxElement) {
+      console.error('❌ StreamingChatbox: Cannot show - chatboxElement not created');
+      return false;
+    }
+
     this.isVisible = true;
     this.chatboxElement.style.display = 'flex';
+
+    // Debug visibility
+    const computedStyles = window.getComputedStyle(this.chatboxElement);
+    console.log('🔍 StreamingChatbox: Visibility debug:', {
+      isVisible: this.isVisible,
+      display: this.chatboxElement.style.display,
+      computedDisplay: computedStyles.display,
+      zIndex: computedStyles.zIndex,
+      position: computedStyles.position,
+      inDOM: document.body.contains(this.chatboxElement)
+    });
 
     if (initialMessage) {
       this.addMessage('assistant', initialMessage);
@@ -707,8 +737,12 @@ class StreamingChatbox {
 
     // Focus input
     setTimeout(() => {
-      this.inputElement.focus();
+      if (this.inputElement) {
+        this.inputElement.focus();
+      }
     }, 100);
+
+    return true;
   }
 
   /**
@@ -2551,13 +2585,33 @@ class StreamingChatbox {
   }
 
   /**
+   * Debug method to check chatbox status
+   */
+  debugStatus() {
+    const status = {
+      isVisible: this.isVisible,
+      hasElement: !!this.chatboxElement,
+      inDOM: this.chatboxElement ? document.body.contains(this.chatboxElement) : false,
+      displayStyle: this.chatboxElement ? this.chatboxElement.style.display : 'N/A',
+      computedDisplay: this.chatboxElement ? window.getComputedStyle(this.chatboxElement).display : 'N/A',
+      zIndex: this.chatboxElement ? window.getComputedStyle(this.chatboxElement).zIndex : 'N/A',
+      position: this.chatboxElement ? window.getComputedStyle(this.chatboxElement).position : 'N/A',
+      messagesCount: this.messagesContainer ? this.messagesContainer.children.length : 0,
+      conversationHistoryLength: this.conversationHistory.length
+    };
+
+    console.log('🔍 StreamingChatbox Debug Status:', status);
+    return status;
+  }
+
+  /**
    * Destroy the chatbox
    */
   destroy() {
     if (this.chatboxElement) {
       this.chatboxElement.remove();
     }
-    
+
     // Remove styles if no other chatboxes exist
     const existingChatboxes = document.querySelectorAll('.aifiverr-streaming-chatbox');
     if (existingChatboxes.length === 0) {

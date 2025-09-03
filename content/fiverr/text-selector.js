@@ -2028,11 +2028,11 @@ class TextSelector {
 
     // Chat button - transition to streaming chatbox
     const continueBtn = popup.querySelector('.continue-chat-btn');
-    console.log('aiFiverr: Chat button found:', continueBtn);
+    console.log('🔍 aiFiverr: Chat button found:', continueBtn);
 
     if (continueBtn) {
       continueBtn.addEventListener('click', async (event) => {
-        console.log('aiFiverr: Chat button clicked!', event);
+        console.log('🖱️ aiFiverr: Chat button clicked!', event);
         event.preventDefault();
         event.stopPropagation();
 
@@ -2040,25 +2040,37 @@ class TextSelector {
         const currentText = isEditing ? textarea.value : (popup.dataset.currentText || result);
         const originalSelectedText = popup.dataset.originalText || originalText;
 
-        console.log('aiFiverr: Chat clicked', { currentText, originalSelectedText });
+        console.log('📝 aiFiverr: Chat clicked with data:', {
+          currentText: currentText?.substring(0, 100) + '...',
+          originalSelectedText: originalSelectedText?.substring(0, 100) + '...',
+          isEditing
+        });
 
       try {
         // Check if StreamingChatbox is available
         if (typeof window.StreamingChatbox === 'undefined') {
-          console.error('aiFiverr: StreamingChatbox not available, keeping popup open');
+          console.error('❌ aiFiverr: StreamingChatbox not available, keeping popup open');
           this.showToast('Streaming chat not available. Please try again.');
           return;
         }
 
+        console.log('✅ aiFiverr: StreamingChatbox available, proceeding with chat initialization');
+
         // Show streaming chatbox with conversation context (this will handle popup closing internally)
         const success = await this.showStreamingChatbox(currentText, originalSelectedText);
 
+        console.log('📊 aiFiverr: showStreamingChatbox result:', success);
+
         // Only close popup if chatbox opened successfully
         if (success) {
+          console.log('✅ aiFiverr: Closing result popup after successful chatbox opening');
           this.closeResultPopup(popup);
+        } else {
+          console.error('❌ aiFiverr: Failed to open streaming chatbox, keeping popup open');
+          this.showToast('Failed to open streaming chat. Please try again.');
         }
       } catch (error) {
-        console.error('aiFiverr: Error opening streaming chatbox:', error);
+        console.error('❌ aiFiverr: Error opening streaming chatbox:', error);
         this.showToast('Error opening chat. Please try again.');
       }
     });
@@ -3298,18 +3310,18 @@ class TextSelector {
    * @returns {Promise<boolean>} - Returns true if chatbox opened successfully, false otherwise
    */
   async showStreamingChatbox(initialResult, originalText) {
-    console.log('aiFiverr: Showing streaming chatbox with initial result', { initialResult, originalText });
+    console.log('🚀 aiFiverr: Showing streaming chatbox with initial result', { initialResult, originalText });
 
     try {
       // Create or get existing chatbox instance
       if (!this.streamingChatbox) {
         // Check if StreamingChatbox class is available
         if (typeof window.StreamingChatbox === 'undefined') {
-          console.error('aiFiverr: StreamingChatbox class not available');
+          console.error('❌ aiFiverr: StreamingChatbox class not available');
           return false;
         }
 
-        console.log('aiFiverr: Creating new StreamingChatbox instance');
+        console.log('🔧 aiFiverr: Creating new StreamingChatbox instance');
 
         this.streamingChatbox = new window.StreamingChatbox({
           maxWidth: '700px',
@@ -3319,6 +3331,17 @@ class TextSelector {
           enableDragging: true,
           enableResizing: true
         });
+
+        // Wait a moment for initialization to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Verify chatbox element was created
+        if (!this.streamingChatbox.chatboxElement) {
+          console.error('❌ aiFiverr: StreamingChatbox element not created');
+          return false;
+        }
+
+        console.log('✅ aiFiverr: StreamingChatbox instance created successfully');
       }
 
       // NEW: Set original context for consistent variable usage
@@ -3384,7 +3407,29 @@ class TextSelector {
       });
 
       // Show the chatbox first
+      console.log('👁️ aiFiverr: Showing streaming chatbox...');
       this.streamingChatbox.show();
+
+      // Verify chatbox is visible
+      if (!this.streamingChatbox.isVisible) {
+        console.error('❌ aiFiverr: Chatbox show() failed - not visible');
+        return false;
+      }
+
+      // Check if chatbox element is in DOM and visible
+      const chatboxInDOM = document.body.contains(this.streamingChatbox.chatboxElement);
+      const displayStyle = this.streamingChatbox.chatboxElement.style.display;
+
+      console.log('🔍 aiFiverr: Chatbox visibility check:', {
+        isVisible: this.streamingChatbox.isVisible,
+        inDOM: chatboxInDOM,
+        displayStyle: displayStyle
+      });
+
+      if (!chatboxInDOM) {
+        console.error('❌ aiFiverr: Chatbox element not found in DOM');
+        return false;
+      }
 
       // Add the initial messages to the UI (display the original text for user, AI result as-is)
       this.streamingChatbox.addMessage('user', originalText);
@@ -3393,7 +3438,7 @@ class TextSelector {
       // Hide the floating icon since we now have the chatbox
       this.hideFloatingIcon();
 
-      console.log('aiFiverr: Streaming chatbox initialized with conversation context:', this.streamingChatbox.conversationHistory);
+      console.log('✅ aiFiverr: Streaming chatbox initialized successfully with conversation context:', this.streamingChatbox.conversationHistory);
 
       return true; // Success
     } catch (error) {
