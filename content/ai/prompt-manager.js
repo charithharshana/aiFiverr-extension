@@ -151,22 +151,13 @@ Make it grammatically correct, clear, and professional, but keep the original me
       let prompts = result.customPrompts || {};
 
       // Try to load from Google Drive backup if local storage is empty
-      // Delegate to knowledge base manager for consistency
       if (Object.keys(prompts).length === 0) {
-        if (window.knowledgeBaseManager && typeof window.knowledgeBaseManager.syncCustomPromptsFromGoogleDrive === 'function') {
-          // Let knowledge base manager handle the sync and reload from storage
-          await window.knowledgeBaseManager.syncCustomPromptsFromGoogleDrive();
-          const updatedResult = await this.storageManager.get('customPrompts');
-          prompts = updatedResult.customPrompts || {};
-        } else {
-          // Fallback to old method if knowledge base manager not available
-          const drivePrompts = await this.loadPromptsFromGoogleDrive();
-          if (drivePrompts) {
-            prompts = drivePrompts;
-            // Save to local storage for faster access
-            await this.storageManager.set({ customPrompts: prompts });
-            console.log('aiFiverr: Restored prompts from Google Drive backup');
-          }
+        const drivePrompts = await this.loadPromptsFromGoogleDrive();
+        if (drivePrompts) {
+          prompts = drivePrompts;
+          // Save to local storage for faster access
+          await this.storageManager.set({ customPrompts: prompts });
+          console.log('aiFiverr: Restored prompts from Google Drive backup');
         }
       }
 
@@ -368,13 +359,8 @@ Make it grammatically correct, clear, and professional, but keep the original me
     // Save to local storage first
     await this.storageManager.set({ customPrompts: data });
 
-    // Delegate Google Drive sync to knowledge base manager for consistency
-    if (window.knowledgeBaseManager && typeof window.knowledgeBaseManager.syncToGoogleDrive === 'function') {
-      await window.knowledgeBaseManager.syncToGoogleDrive('custom-prompts', data);
-    } else {
-      // Fallback to old method if knowledge base manager not available
-      await this.savePromptsToGoogleDrive(data);
-    }
+    // Also save to Google Drive if available
+    await this.savePromptsToGoogleDrive(data);
   }
 
   /**
@@ -508,42 +494,31 @@ Make it grammatically correct, clear, and professional, but keep the original me
         throw new Error('Google authentication required');
       }
 
-      // Delegate to knowledge base manager for consistency
-      if (window.knowledgeBaseManager && typeof window.knowledgeBaseManager.syncCustomPromptsFromGoogleDrive === 'function') {
-        await window.knowledgeBaseManager.syncCustomPromptsFromGoogleDrive();
+      // Load latest from Google Drive
+      const drivePrompts = await this.loadPromptsFromGoogleDrive();
 
-        // Reload prompts from storage after sync
-        await this.loadCustomPrompts();
+      if (drivePrompts) {
+        // Merge with local prompts (local takes precedence for conflicts)
+        const localPrompts = Object.fromEntries(this.customPrompts);
+        const mergedPrompts = { ...drivePrompts, ...localPrompts };
 
-        console.log('aiFiverr: Prompts synced with Google Drive via knowledge base manager');
-        return true;
-      } else {
-        // Fallback to old method if knowledge base manager not available
-        const drivePrompts = await this.loadPromptsFromGoogleDrive();
-
-        if (drivePrompts) {
-          // Merge with local prompts (local takes precedence for conflicts)
-          const localPrompts = Object.fromEntries(this.customPrompts);
-          const mergedPrompts = { ...drivePrompts, ...localPrompts };
-
-          // Update local storage
-          this.customPrompts.clear();
-          Object.entries(mergedPrompts).forEach(([key, prompt]) => {
-            this.customPrompts.set(key, {
-              ...prompt,
-              isDefault: false
-            });
+        // Update local storage
+        this.customPrompts.clear();
+        Object.entries(mergedPrompts).forEach(([key, prompt]) => {
+          this.customPrompts.set(key, {
+            ...prompt,
+            isDefault: false
           });
+        });
 
-          // Save merged data back to both storages
-          await this.saveCustomPromptsToStorage();
+        // Save merged data back to both storages
+        await this.saveCustomPromptsToStorage();
 
-          console.log('aiFiverr: Prompts synced with Google Drive');
-          return true;
-        }
-
-        return false;
+        console.log('aiFiverr: Prompts synced with Google Drive');
+        return true;
       }
+
+      return false;
     } catch (error) {
       console.error('aiFiverr: Failed to sync with Google Drive:', error);
       throw error;

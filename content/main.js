@@ -739,6 +739,20 @@ class AiFiverrMain {
           sendResponse({ success: true, stats: authStats });
           break;
 
+        case 'SYNC_CUSTOM_PROMPTS_AND_VARIABLES':
+          try {
+            if (window.knowledgeBaseManager) {
+              await window.knowledgeBaseManager.syncCustomPromptsAndVariables();
+              sendResponse({ success: true, message: 'Custom prompts and variables synced successfully' });
+            } else {
+              sendResponse({ success: false, error: 'Knowledge base manager not available' });
+            }
+          } catch (error) {
+            console.error('aiFiverr: Failed to sync custom prompts and variables:', error);
+            sendResponse({ success: false, error: error.message });
+          }
+          break;
+
         // Knowledge Base Files handlers
         // File operations are handled by background script
         case 'GET_DRIVE_FILES':

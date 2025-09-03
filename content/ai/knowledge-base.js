@@ -22,9 +22,6 @@ class KnowledgeBaseManager {
     await this.loadTemplates();
     await this.loadKnowledgeBaseFiles();
 
-    // Set up authentication listeners for automatic sync
-    this.setupAuthenticationListeners();
-
     // Only initialize file lifecycle manager and sync if authenticated
     if (this.isUserAuthenticated()) {
       // Initialize comprehensive file lifecycle manager
@@ -32,14 +29,14 @@ class KnowledgeBaseManager {
 
       // Sync with Gemini Files API in background to avoid blocking initialization
       this.syncWithGeminiFilesInBackground();
-
-      // Automatically sync custom prompts and variables from Google Drive
-      this.syncCustomDataInBackground();
     } else {
       if (window.aiFiverrDebug) {
         console.log('aiFiverr KB: Skipping file operations - user not authenticated');
       }
     }
+
+    // Set up authentication listener to sync when user signs in
+    this.setupAuthListener();
   }
 
   /**
@@ -47,6 +44,27 @@ class KnowledgeBaseManager {
    */
   isUserAuthenticated() {
     return window.googleAuthService && window.googleAuthService.isUserAuthenticated();
+  }
+
+  /**
+   * Set up authentication listener to sync data when user signs in
+   */
+  setupAuthListener() {
+    if (window.googleAuthService && window.googleAuthService.addAuthListener) {
+      window.googleAuthService.addAuthListener((authState) => {
+        if (authState.isAuthenticated && !this.wasAuthenticated) {
+          // User just signed in, trigger sync
+          console.log('aiFiverr KB: User authenticated, triggering sync...');
+          setTimeout(() => {
+            this.syncCustomPromptsAndVariables();
+          }, 3000); // Wait 3 seconds to allow other initialization to complete
+        }
+        this.wasAuthenticated = authState.isAuthenticated;
+      });
+
+      // Track initial authentication state
+      this.wasAuthenticated = this.isUserAuthenticated();
+    }
   }
 
   /**
@@ -69,92 +87,22 @@ class KnowledgeBaseManager {
   }
 
   /**
-   * Set up authentication listeners for automatic sync
-   */
-  setupAuthenticationListeners() {
-    try {
-      // Set up listener for authentication state changes
-      if (window.googleAuthService && typeof window.googleAuthService.addAuthListener === 'function') {
-        const authListener = async (authState) => {
-          console.log('aiFiverr KB: Auth state change detected:', authState);
-          if (authState.isAuthenticated) {
-            console.log('aiFiverr KB: User authenticated, starting automatic sync...');
-
-            // Sync custom prompts and variables from Google Drive
-            setTimeout(async () => {
-              try {
-                console.log('aiFiverr KB: Starting automatic sync after authentication...');
-                await this.syncCustomDataFromGoogleDrive();
-                console.log('aiFiverr KB: Automatic sync completed after authentication');
-              } catch (error) {
-                console.warn('aiFiverr KB: Automatic sync failed after authentication:', error);
-              }
-            }, 3000); // Wait 3 seconds to ensure auth is fully established
-          }
-        };
-
-        window.googleAuthService.addAuthListener(authListener);
-        console.log('aiFiverr KB: Authentication listeners set up successfully');
-
-        // Also check if user is already authenticated and trigger sync if needed
-        if (window.googleAuthService.isUserAuthenticated()) {
-          console.log('aiFiverr KB: User already authenticated, triggering initial sync...');
-          setTimeout(async () => {
-            try {
-              await this.syncCustomDataFromGoogleDrive();
-              console.log('aiFiverr KB: Initial sync completed for already authenticated user');
-            } catch (error) {
-              console.warn('aiFiverr KB: Initial sync failed:', error);
-            }
-          }, 1000); // Shorter delay for initial sync
-        }
-      } else {
-        console.log('aiFiverr KB: Auth service not ready, retrying in 2 seconds...');
-        // Retry setting up listeners after a delay if auth service isn't ready
-        setTimeout(() => {
-          this.setupAuthenticationListeners();
-        }, 2000);
-      }
-    } catch (error) {
-      console.warn('aiFiverr KB: Failed to set up authentication listeners:', error);
-      // Retry on error
-      setTimeout(() => {
-        this.setupAuthenticationListeners();
-      }, 5000);
-    }
-  }
-
-  /**
    * Sync with Gemini Files API in background without blocking initialization
    */
   syncWithGeminiFilesInBackground() {
     setTimeout(async () => {
       try {
         await this.syncWithGeminiFiles();
+        // Also sync custom prompts and variables in background
+        await this.syncCustomPromptsAndVariables();
         // Only log if debugging is enabled
         if (window.aiFiverrDebug) {
-          console.log('aiFiverr KB: Background sync with Gemini Files completed');
+          console.log('aiFiverr KB: Background sync with Gemini Files and custom data completed');
         }
       } catch (error) {
-        console.warn('aiFiverr KB: Background sync with Gemini Files failed:', error);
+        console.warn('aiFiverr KB: Background sync failed:', error);
       }
     }, 2000); // Wait 2 seconds after initialization
-  }
-
-  /**
-   * Sync custom prompts and variables in background without blocking initialization
-   */
-  syncCustomDataInBackground() {
-    setTimeout(async () => {
-      try {
-        await this.syncCustomDataFromGoogleDrive();
-        if (window.aiFiverrDebug) {
-          console.log('aiFiverr KB: Background sync of custom data completed');
-        }
-      } catch (error) {
-        console.warn('aiFiverr KB: Background sync of custom data failed:', error);
-      }
-    }, 4000); // Wait 4 seconds after initialization to avoid conflicts
   }
 
   /**
@@ -1759,7 +1707,7 @@ class KnowledgeBaseManager {
       await window.storageManager.saveKnowledgeBase(data);
 
       // Also sync to Google Drive if authenticated
-      await this.syncToGoogleDrive('variables', data);
+      await this.syncKnowledgeBaseVariablesToGoogleDrive(data);
     } catch (error) {
       console.error('Failed to save knowledge base:', error);
     }
@@ -1779,9 +1727,179 @@ class KnowledgeBaseManager {
       await window.storageManager.set({ customPrompts: data });
 
       // Also sync to Google Drive if authenticated
-      await this.syncToGoogleDrive('custom-prompts', data);
+      await this.syncCustomPromptsToGoogleDrive(data);
     } catch (error) {
       console.error('Failed to save custom prompts:', error);
+    }
+  }
+
+  /**
+   * Sync custom prompts and variables to/from Google Drive
+   */
+  async syncCustomPromptsAndVariables() {
+    try {
+      if (!this.isUserAuthenticated() || !window.googleDriveClient) {
+        if (window.aiFiverrDebug) {
+          console.log('aiFiverr KB: Skipping custom prompts/variables sync - not authenticated or Drive client unavailable');
+        }
+        return;
+      }
+
+      console.log('aiFiverr KB: Starting sync of custom prompts and variables...');
+
+      // Sync custom prompts
+      await this.syncCustomPrompts();
+
+      // Sync knowledge base variables
+      await this.syncKnowledgeBaseVariables();
+
+      console.log('aiFiverr KB: Custom prompts and variables sync completed');
+    } catch (error) {
+      console.error('aiFiverr KB: Failed to sync custom prompts and variables:', error);
+    }
+  }
+
+  /**
+   * Sync custom prompts with Google Drive
+   */
+  async syncCustomPrompts() {
+    try {
+      // Load from Google Drive
+      const driveResult = await window.googleDriveClient.loadCustomPrompts();
+
+      if (driveResult.success && driveResult.data && Object.keys(driveResult.data).length > 0) {
+        // Get current local prompts
+        const localPrompts = Object.fromEntries(this.customPrompts);
+
+        // Merge with Drive data (local takes precedence for conflicts)
+        const mergedPrompts = { ...driveResult.data, ...localPrompts };
+
+        // Update local storage
+        this.customPrompts.clear();
+        Object.entries(mergedPrompts).forEach(([key, prompt]) => {
+          this.customPrompts.set(key, prompt);
+        });
+
+        // Save merged data back to local storage
+        await this.saveCustomPrompts();
+
+        console.log('aiFiverr KB: Custom prompts synced from Google Drive');
+      } else {
+        // No data in Drive or error loading, save current local data to Drive
+        const localPrompts = Object.fromEntries(this.customPrompts);
+        if (Object.keys(localPrompts).length > 0) {
+          await this.syncCustomPromptsToGoogleDrive(localPrompts);
+        }
+      }
+    } catch (error) {
+      console.error('aiFiverr KB: Failed to sync custom prompts:', error);
+    }
+  }
+
+  /**
+   * Sync knowledge base variables with Google Drive
+   */
+  async syncKnowledgeBaseVariables() {
+    try {
+      // Load from Google Drive
+      const driveResult = await window.googleDriveClient.loadKnowledgeBaseVariables();
+
+      if (driveResult.success && driveResult.data && Object.keys(driveResult.data).length > 0) {
+        // Get current local variables
+        const localVariables = await this.getKnowledgeBaseVariables();
+
+        // Merge with Drive data (local takes precedence for conflicts)
+        const mergedVariables = { ...driveResult.data, ...localVariables };
+
+        // Save merged data back to local storage
+        await this.saveKnowledgeBaseVariables(mergedVariables);
+
+        console.log('aiFiverr KB: Knowledge base variables synced from Google Drive');
+      } else {
+        // No data in Drive or error loading, save current local data to Drive
+        const localVariables = await this.getKnowledgeBaseVariables();
+        if (Object.keys(localVariables).length > 0) {
+          await this.syncKnowledgeBaseVariablesToGoogleDrive(localVariables);
+        }
+      }
+    } catch (error) {
+      console.error('aiFiverr KB: Failed to sync knowledge base variables:', error);
+    }
+  }
+
+  /**
+   * Save custom prompts to Google Drive
+   */
+  async syncCustomPromptsToGoogleDrive(promptsData) {
+    try {
+      if (!window.googleDriveClient || !this.isUserAuthenticated()) {
+        return;
+      }
+
+      const result = await window.googleDriveClient.saveCustomPrompts(promptsData);
+      if (result.success) {
+        console.log('aiFiverr KB: Custom prompts backed up to Google Drive');
+      } else {
+        console.warn('aiFiverr KB: Failed to backup custom prompts to Google Drive:', result.error);
+      }
+    } catch (error) {
+      console.error('aiFiverr KB: Error backing up custom prompts to Google Drive:', error);
+    }
+  }
+
+  /**
+   * Save knowledge base variables to Google Drive
+   */
+  async syncKnowledgeBaseVariablesToGoogleDrive(variablesData) {
+    try {
+      if (!window.googleDriveClient || !this.isUserAuthenticated()) {
+        return;
+      }
+
+      const result = await window.googleDriveClient.saveKnowledgeBaseVariables(variablesData);
+      if (result.success) {
+        console.log('aiFiverr KB: Knowledge base variables backed up to Google Drive');
+      } else {
+        console.warn('aiFiverr KB: Failed to backup knowledge base variables to Google Drive:', result.error);
+      }
+    } catch (error) {
+      console.error('aiFiverr KB: Error backing up knowledge base variables to Google Drive:', error);
+    }
+  }
+
+  /**
+   * Get knowledge base variables from storage
+   */
+  async getKnowledgeBaseVariables() {
+    try {
+      if (!window.storageManager) {
+        return {};
+      }
+
+      const result = await window.storageManager.get('knowledgeBase');
+      return result.knowledgeBase || {};
+    } catch (error) {
+      console.error('aiFiverr KB: Failed to get knowledge base variables:', error);
+      return {};
+    }
+  }
+
+  /**
+   * Save knowledge base variables to storage
+   */
+  async saveKnowledgeBaseVariables(variables) {
+    try {
+      if (!window.storageManager) {
+        console.warn('aiFiverr KB: Storage manager not available, skipping variables save');
+        return;
+      }
+
+      await window.storageManager.set({ knowledgeBase: variables });
+
+      // Also sync to Google Drive if authenticated
+      await this.syncKnowledgeBaseVariablesToGoogleDrive(variables);
+    } catch (error) {
+      console.error('aiFiverr KB: Failed to save knowledge base variables:', error);
     }
   }
 
@@ -2537,186 +2655,6 @@ class KnowledgeBaseManager {
   }
 
   /**
-   * Sync custom prompts and variables from Google Drive (automatic restore)
-   */
-  async syncCustomDataFromGoogleDrive() {
-    try {
-      console.log('aiFiverr KB: syncCustomDataFromGoogleDrive called');
-
-      if (!this.isUserAuthenticated()) {
-        console.log('aiFiverr KB: User not authenticated, skipping custom data sync');
-        return { success: false, reason: 'not_authenticated' };
-      }
-
-      if (!window.googleDriveClient) {
-        console.log('aiFiverr KB: Google Drive client not available, skipping sync');
-        return { success: false, reason: 'no_drive_client' };
-      }
-
-      console.log('aiFiverr KB: Starting automatic sync of custom prompts and variables from Google Drive...');
-
-      // Sync custom prompts
-      const promptsResult = await this.syncCustomPromptsFromGoogleDrive();
-      console.log('aiFiverr KB: Custom prompts sync result:', promptsResult);
-
-      // Sync knowledge base variables
-      const variablesResult = await this.syncVariablesFromGoogleDrive();
-      console.log('aiFiverr KB: Variables sync result:', variablesResult);
-
-      console.log('aiFiverr KB: Automatic sync of custom data completed successfully');
-      return { success: true, prompts: promptsResult, variables: variablesResult };
-    } catch (error) {
-      console.error('aiFiverr KB: Failed to sync custom data from Google Drive:', error);
-      return { success: false, error: error.message };
-    }
-  }
-
-  /**
-   * Sync custom prompts from Google Drive
-   */
-  async syncCustomPromptsFromGoogleDrive() {
-    try {
-      console.log('aiFiverr KB: syncCustomPromptsFromGoogleDrive called');
-
-      if (!window.googleDriveClient) {
-        console.log('aiFiverr KB: Google Drive client not available for prompts sync');
-        return { success: false, reason: 'no_drive_client' };
-      }
-
-      console.log('aiFiverr KB: Searching for custom prompts backup file...');
-      // Search for custom prompts backup file
-      const files = await window.googleDriveClient.searchFiles('aifiverr-custom-prompts.json');
-      console.log(`aiFiverr KB: Found ${files.length} custom prompts backup files`);
-
-      if (files.length === 0) {
-        console.log('aiFiverr KB: No custom prompts backup found in Google Drive');
-        return { success: true, reason: 'no_backup_found', restored: 0 };
-      }
-
-      // Get the most recent backup file
-      const latestFile = files.sort((a, b) => new Date(b.modifiedTime) - new Date(a.modifiedTime))[0];
-      console.log('aiFiverr KB: Using latest backup file:', latestFile.name, 'modified:', latestFile.modifiedTime);
-
-      // Download and parse the file
-      console.log('aiFiverr KB: Downloading backup file...');
-      const fileContent = await window.googleDriveClient.downloadFile(latestFile.id);
-      const drivePrompts = JSON.parse(fileContent);
-      console.log(`aiFiverr KB: Downloaded ${Object.keys(drivePrompts).length} prompts from backup`);
-
-      // Get current local prompts
-      const localPrompts = Object.fromEntries(this.customPrompts);
-      console.log(`aiFiverr KB: Current local prompts: ${Object.keys(localPrompts).length}`);
-
-      // Merge prompts (prioritize newer modifications)
-      const mergedPrompts = this.mergeCustomPrompts(localPrompts, drivePrompts);
-      console.log(`aiFiverr KB: Merged to ${Object.keys(mergedPrompts).length} total prompts`);
-
-      // Update local storage with merged data
-      this.customPrompts.clear();
-      Object.entries(mergedPrompts).forEach(([key, prompt]) => {
-        this.customPrompts.set(key, {
-          ...prompt,
-          isDefault: false
-        });
-      });
-
-      // Save merged data back to local storage
-      await this.saveCustomPrompts();
-
-      console.log(`aiFiverr KB: Successfully synced ${Object.keys(mergedPrompts).length} custom prompts from Google Drive`);
-      return { success: true, restored: Object.keys(mergedPrompts).length };
-    } catch (error) {
-      console.error('aiFiverr KB: Failed to sync custom prompts from Google Drive:', error);
-      return { success: false, error: error.message };
-    }
-  }
-
-  /**
-   * Sync knowledge base variables from Google Drive
-   */
-  async syncVariablesFromGoogleDrive() {
-    try {
-      console.log('aiFiverr KB: syncVariablesFromGoogleDrive called');
-
-      if (!window.googleDriveClient) {
-        console.log('aiFiverr KB: Google Drive client not available for variables sync');
-        return { success: false, reason: 'no_drive_client' };
-      }
-
-      console.log('aiFiverr KB: Searching for variables backup file...');
-      // Search for variables backup file
-      const files = await window.googleDriveClient.searchFiles('aifiverr-knowledge-base-variables.json');
-      console.log(`aiFiverr KB: Found ${files.length} variables backup files`);
-
-      if (files.length === 0) {
-        console.log('aiFiverr KB: No knowledge base variables backup found in Google Drive');
-        return { success: true, reason: 'no_backup_found', restored: 0 };
-      }
-
-      // Get the most recent backup file
-      const latestFile = files.sort((a, b) => new Date(b.modifiedTime) - new Date(a.modifiedTime))[0];
-      console.log('aiFiverr KB: Using latest backup file:', latestFile.name, 'modified:', latestFile.modifiedTime);
-
-      // Download and parse the file
-      console.log('aiFiverr KB: Downloading variables backup file...');
-      const fileContent = await window.googleDriveClient.downloadFile(latestFile.id);
-      const driveVariables = JSON.parse(fileContent);
-      console.log(`aiFiverr KB: Downloaded ${Object.keys(driveVariables).length} variables from backup`);
-
-      // Get current local variables
-      const localVariables = Object.fromEntries(this.variables);
-      console.log(`aiFiverr KB: Current local variables: ${Object.keys(localVariables).length}`);
-
-      // Merge variables (prioritize local over drive for variables)
-      const mergedVariables = { ...driveVariables, ...localVariables };
-      console.log(`aiFiverr KB: Merged to ${Object.keys(mergedVariables).length} total variables`);
-
-      // Update local storage with merged data
-      this.variables.clear();
-      Object.entries(mergedVariables).forEach(([key, value]) => {
-        this.variables.set(key, value);
-      });
-
-      // Save merged data back to local storage
-      await this.saveKnowledgeBase();
-
-      console.log(`aiFiverr KB: Successfully synced ${Object.keys(mergedVariables).length} knowledge base variables from Google Drive`);
-      return { success: true, restored: Object.keys(mergedVariables).length };
-    } catch (error) {
-      console.error('aiFiverr KB: Failed to sync knowledge base variables from Google Drive:', error);
-      return { success: false, error: error.message };
-    }
-  }
-
-  /**
-   * Merge custom prompts with conflict resolution
-   */
-  mergeCustomPrompts(localPrompts, drivePrompts) {
-    const merged = { ...drivePrompts };
-
-    // For each local prompt, check if it should override the drive version
-    Object.entries(localPrompts).forEach(([key, localPrompt]) => {
-      const drivePrompt = drivePrompts[key];
-
-      if (!drivePrompt) {
-        // Local prompt doesn't exist in drive, add it
-        merged[key] = localPrompt;
-      } else {
-        // Both exist, use the one with the latest modification time
-        const localModified = new Date(localPrompt.modified || 0);
-        const driveModified = new Date(drivePrompt.modified || 0);
-
-        if (localModified > driveModified) {
-          merged[key] = localPrompt;
-        }
-        // Otherwise keep the drive version (already in merged)
-      }
-    });
-
-    return merged;
-  }
-
-  /**
    * Sync data to Google Drive
    */
   async syncToGoogleDrive(dataType, data) {
@@ -2740,35 +2678,16 @@ class KnowledgeBaseManager {
         return;
       }
 
-      // Create JSON file with data
-      const jsonData = JSON.stringify(data, null, 2);
-      const blob = new Blob([jsonData], { type: 'application/json' });
+      const fileName = `aifiverr-${dataType}.json`;
+      const description = `aiFiverr ${dataType} data - automatically synced`;
 
-      let fileName, description, tags;
+      await window.googleDriveClient.saveDataFile(fileName, {
+        type: dataType,
+        timestamp: new Date().toISOString(),
+        data: data
+      }, description);
 
-      switch (dataType) {
-        case 'variables':
-          fileName = 'aifiverr-knowledge-base-variables.json';
-          description = 'aiFiverr knowledge base variables backup';
-          tags = ['aifiverr', 'variables', 'backup'];
-          break;
-        case 'custom-prompts':
-          fileName = 'aifiverr-custom-prompts.json';
-          description = 'aiFiverr custom prompts backup';
-          tags = ['aifiverr', 'prompts', 'backup'];
-          break;
-        default:
-          fileName = `aifiverr-${dataType}.json`;
-          description = `aiFiverr ${dataType} backup`;
-          tags = ['aifiverr', dataType, 'backup'];
-      }
-
-      const file = new File([blob], fileName, { type: 'application/json' });
-
-      // Upload to Google Drive
-      await window.googleDriveClient.uploadFile(file, fileName, description, tags);
-
-      console.log(`aiFiverr KB: ${dataType} synced to Google Drive successfully`);
+      console.log(`aiFiverr KB: Synced ${dataType} to Google Drive`);
     } catch (error) {
       console.warn(`aiFiverr KB: Failed to sync ${dataType} to Google Drive:`, error);
       // Don't throw error - sync is optional
@@ -2790,110 +2709,6 @@ window.initializeKnowledgeBaseManager = initializeKnowledgeBaseManager;
 
 // REMOVED AUTO-INITIALIZATION - This was causing the knowledge base manager to load on every website
 // The knowledge base manager should only be initialized when explicitly called by the main extension
-
-/**
- * Manual test functions for debugging sync functionality
- */
-window.testKnowledgeBaseSync = {
-  /**
-   * Test the complete sync functionality
-   */
-  async testSync() {
-    console.log('🧪 Testing Knowledge Base Sync Functionality...');
-
-    if (!window.knowledgeBaseManager) {
-      console.error('❌ Knowledge Base Manager not available');
-      return false;
-    }
-
-    try {
-      // Test sync
-      const result = await window.knowledgeBaseManager.syncCustomDataFromGoogleDrive();
-      console.log('✅ Sync test result:', result);
-      return result;
-    } catch (error) {
-      console.error('❌ Sync test failed:', error);
-      return false;
-    }
-  },
-
-  /**
-   * Test authentication listeners
-   */
-  testAuthListeners() {
-    console.log('🔐 Testing Authentication Listeners...');
-
-    if (!window.googleAuthService) {
-      console.error('❌ Google Auth Service not available');
-      return false;
-    }
-
-    // Add test listener
-    let triggered = false;
-    const testListener = (authState) => {
-      console.log('✅ Auth listener triggered:', authState);
-      triggered = true;
-    };
-
-    window.googleAuthService.addAuthListener(testListener);
-    window.googleAuthService.notifyAuthListeners();
-
-    return triggered;
-  },
-
-  /**
-   * Create test data and backup
-   */
-  async createTestData() {
-    console.log('📝 Creating test data...');
-
-    if (!window.knowledgeBaseManager) {
-      console.error('❌ Knowledge Base Manager not available');
-      return false;
-    }
-
-    // Add test prompt
-    const testPrompt = {
-      title: 'Test Sync Prompt',
-      content: 'This is a test prompt for sync: {conversation}',
-      description: 'Test prompt for sync functionality',
-      created: Date.now(),
-      modified: Date.now(),
-      isDefault: false
-    };
-
-    window.knowledgeBaseManager.customPrompts.set('test-sync-prompt', testPrompt);
-    await window.knowledgeBaseManager.saveCustomPrompts();
-
-    // Add test variable
-    window.knowledgeBaseManager.variables.set('test-sync-var', 'Test sync variable value');
-    await window.knowledgeBaseManager.saveKnowledgeBase();
-
-    console.log('✅ Test data created and saved');
-    return true;
-  },
-
-  /**
-   * Check current data
-   */
-  checkData() {
-    console.log('📊 Current Knowledge Base Data:');
-
-    if (window.knowledgeBaseManager) {
-      const prompts = Array.from(window.knowledgeBaseManager.customPrompts.keys());
-      const variables = Array.from(window.knowledgeBaseManager.variables.keys());
-
-      console.log('Custom Prompts:', prompts);
-      console.log('Variables:', variables);
-
-      return { prompts, variables };
-    }
-
-    return { prompts: [], variables: [] };
-  }
-};
-
-console.log('🧪 Knowledge Base test functions available at window.testKnowledgeBaseSync');
 
 /**
  * COMPREHENSIVE FILE MANAGEMENT TESTING SUITE

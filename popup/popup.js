@@ -120,7 +120,7 @@ class PopupManager {
     });
 
     document.getElementById('refreshKbFiles')?.addEventListener('click', () => {
-      this.loadKnowledgeBaseFiles();
+      this.syncAllData();
     });
 
     document.getElementById('fileInput')?.addEventListener('change', (e) => {
@@ -3922,6 +3922,48 @@ class PopupManager {
     } catch (error) {
       console.error('aiFiverr Popup: Failed to load knowledge base files with auth check:', error);
       this.displayKnowledgeBaseFilesError('Failed to load files. Please try again.');
+    }
+  }
+
+  /**
+   * Sync all data including knowledge base files, custom prompts, and variables
+   */
+  async syncAllData() {
+    try {
+      this.showLoading(true);
+      this.showToast('Syncing all data...', 'info');
+
+      // Check authentication first
+      const authResult = await this.checkGoogleAuth();
+      if (!authResult.success) {
+        this.showToast('Please authenticate with Google to sync data', 'error');
+        return;
+      }
+
+      // Sync knowledge base files
+      await this.loadKnowledgeBaseFiles();
+
+      // Sync custom prompts and variables through content script
+      const syncResult = await this.sendMessageToTab({
+        type: 'SYNC_CUSTOM_PROMPTS_AND_VARIABLES'
+      });
+
+      if (syncResult && syncResult.success) {
+        // Reload prompts and knowledge base to reflect synced data
+        await this.loadPrompts();
+        await this.loadKnowledgeBase();
+
+        this.showToast('All data synced successfully!', 'success');
+      } else {
+        console.warn('aiFiverr Popup: Custom prompts/variables sync had issues:', syncResult?.error);
+        this.showToast('Data synced with some warnings. Check console for details.', 'warning');
+      }
+
+    } catch (error) {
+      console.error('aiFiverr Popup: Failed to sync all data:', error);
+      this.showToast('Failed to sync data. Please try again.', 'error');
+    } finally {
+      this.showLoading(false);
     }
   }
 

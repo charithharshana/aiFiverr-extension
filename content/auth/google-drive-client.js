@@ -20,7 +20,9 @@ class GoogleDriveClient {
         'audio': ['mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a'],
         'documents': ['pdf', 'ppt', 'pptx', 'xls', 'xlsx']
       },
-      'chat': [] // For Fiverr conversation files
+      'chat': [], // For Fiverr conversation files
+      'prompts': [], // For custom prompts backup
+      'variables': [] // For knowledge base variables backup
     };
 
     this.init();
@@ -706,8 +708,18 @@ class GoogleDriveClient {
       // Ensure aiFiverr folder exists
       await this.ensureAiFiverrFolder();
 
-      // Determine folder based on file type - chat files go to chat folder
-      const folderPath = fileName.includes('conversation') || fileName.includes('chat') ? 'chat' : 'knowledge-base/documents';
+      // Determine folder based on file type
+      let folderPath;
+      if (fileName.includes('conversation') || fileName.includes('chat')) {
+        folderPath = 'chat';
+      } else if (fileName.includes('custom-prompts') || fileName.includes('prompts')) {
+        folderPath = 'prompts';
+      } else if (fileName.includes('variables') || fileName.includes('knowledge-base-variables')) {
+        folderPath = 'variables';
+      } else {
+        folderPath = 'knowledge-base/documents';
+      }
+
       const targetFolderId = await this.getFolderIdForPath(folderPath);
 
       console.log(`aiFiverr Drive: Saving data file '${fileName}' to organized folder: ${folderPath}`);
@@ -787,7 +799,17 @@ class GoogleDriveClient {
       await this.ensureAiFiverrFolder();
 
       // Determine likely folder based on file type
-      const folderPath = fileName.includes('conversation') || fileName.includes('chat') ? 'chat' : 'knowledge-base/documents';
+      let folderPath;
+      if (fileName.includes('conversation') || fileName.includes('chat')) {
+        folderPath = 'chat';
+      } else if (fileName.includes('custom-prompts') || fileName.includes('prompts')) {
+        folderPath = 'prompts';
+      } else if (fileName.includes('variables') || fileName.includes('knowledge-base-variables')) {
+        folderPath = 'variables';
+      } else {
+        folderPath = 'knowledge-base/documents';
+      }
+
       const targetFolderId = await this.getFolderIdForPath(folderPath);
 
       // Search for the file in the organized folder first
@@ -824,6 +846,104 @@ class GoogleDriveClient {
 
     } catch (error) {
       console.error('aiFiverr Drive: Failed to load data file:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Save custom prompts to Google Drive
+   */
+  async saveCustomPrompts(customPrompts) {
+    try {
+      console.log('aiFiverr Drive: Saving custom prompts to Google Drive');
+
+      const fileName = 'custom-prompts.json';
+      const description = 'aiFiverr custom prompts backup';
+
+      const result = await this.saveDataFile(fileName, customPrompts, description);
+
+      if (result.success) {
+        console.log('aiFiverr Drive: Custom prompts saved successfully');
+        return { success: true, fileId: result.fileId };
+      } else {
+        throw new Error(result.error || 'Failed to save custom prompts');
+      }
+    } catch (error) {
+      console.error('aiFiverr Drive: Failed to save custom prompts:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Load custom prompts from Google Drive
+   */
+  async loadCustomPrompts() {
+    try {
+      console.log('aiFiverr Drive: Loading custom prompts from Google Drive');
+
+      const fileName = 'custom-prompts.json';
+      const result = await this.loadDataFile(fileName);
+
+      if (result.success) {
+        console.log('aiFiverr Drive: Custom prompts loaded successfully');
+        return { success: true, data: result.data };
+      } else if (result.error === 'File not found') {
+        console.log('aiFiverr Drive: No custom prompts backup found');
+        return { success: true, data: {} }; // Return empty object if no backup exists
+      } else {
+        throw new Error(result.error || 'Failed to load custom prompts');
+      }
+    } catch (error) {
+      console.error('aiFiverr Drive: Failed to load custom prompts:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Save knowledge base variables to Google Drive
+   */
+  async saveKnowledgeBaseVariables(variables) {
+    try {
+      console.log('aiFiverr Drive: Saving knowledge base variables to Google Drive');
+
+      const fileName = 'knowledge-base-variables.json';
+      const description = 'aiFiverr knowledge base variables backup';
+
+      const result = await this.saveDataFile(fileName, variables, description);
+
+      if (result.success) {
+        console.log('aiFiverr Drive: Knowledge base variables saved successfully');
+        return { success: true, fileId: result.fileId };
+      } else {
+        throw new Error(result.error || 'Failed to save knowledge base variables');
+      }
+    } catch (error) {
+      console.error('aiFiverr Drive: Failed to save knowledge base variables:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Load knowledge base variables from Google Drive
+   */
+  async loadKnowledgeBaseVariables() {
+    try {
+      console.log('aiFiverr Drive: Loading knowledge base variables from Google Drive');
+
+      const fileName = 'knowledge-base-variables.json';
+      const result = await this.loadDataFile(fileName);
+
+      if (result.success) {
+        console.log('aiFiverr Drive: Knowledge base variables loaded successfully');
+        return { success: true, data: result.data };
+      } else if (result.error === 'File not found') {
+        console.log('aiFiverr Drive: No knowledge base variables backup found');
+        return { success: true, data: {} }; // Return empty object if no backup exists
+      } else {
+        throw new Error(result.error || 'Failed to load knowledge base variables');
+      }
+    } catch (error) {
+      console.error('aiFiverr Drive: Failed to load knowledge base variables:', error);
       return { success: false, error: error.message };
     }
   }
