@@ -1018,7 +1018,7 @@ class PopupManager {
       this.favoritePrompts = new Set(favorites);
 
       // Display only custom prompts in the new simplified UI
-      this.displayCustomPrompts(customPrompts);
+      await this.displayCustomPrompts(customPrompts);
 
       console.log('aiFiverr Popup: Loaded custom prompts:', Object.keys(customPrompts).length);
     } catch (error) {
@@ -1089,7 +1089,7 @@ class PopupManager {
   }
 
   // Display custom prompts in the simplified UI
-  displayCustomPrompts(customPrompts) {
+  async displayCustomPrompts(customPrompts) {
     const container = document.getElementById('customPromptsList');
     const countElement = document.getElementById('customPromptsCount');
 
@@ -1099,15 +1099,20 @@ class PopupManager {
     if (countElement) {
       countElement.textContent = `${promptCount} prompt${promptCount !== 1 ? 's' : ''}`;
 
-      // Apply UI update for custom prompt section title
-      const titleElement = countElement.previousElementSibling;
+      // Apply exact UI fix code as provided
+      const $0 = countElement; // Reference element for the fix
+      const titleElement = $0.previousElementSibling;
       if (titleElement) {
-        this.setElementStyles(titleElement, {
+        await this.setElementStyles(titleElement, {
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
         });
       }
+      const data = {
+        applied: !!titleElement,
+      };
+      console.log('Custom prompt title styling applied:', data);
     }
 
     if (promptCount === 0) {
@@ -2054,9 +2059,20 @@ class PopupManager {
     }
 
     return new Promise((resolve) => {
-      chrome.tabs.sendMessage(this.currentTabId, message, (response) => {
-        resolve(response || { success: false, error: 'No response' });
-      });
+      try {
+        chrome.tabs.sendMessage(this.currentTabId, message, (response) => {
+          if (chrome.runtime.lastError) {
+            const errorMessage = chrome.runtime.lastError.message || 'Unknown runtime error';
+            console.warn('aiFiverr Popup: Tab message error:', errorMessage);
+            resolve({ success: false, error: errorMessage });
+            return;
+          }
+          resolve(response || { success: false, error: 'No response' });
+        });
+      } catch (error) {
+        console.error('aiFiverr Popup: Failed to send message to tab:', error);
+        resolve({ success: false, error: error.message });
+      }
     });
   }
 
@@ -2065,7 +2081,15 @@ class PopupManager {
       try {
         // Check if extension context is valid before sending message
         if (!chrome.runtime?.id) {
+          console.warn('aiFiverr Popup: Extension context invalidated');
           resolve({ success: false, error: 'Extension context invalidated' });
+          return;
+        }
+
+        // Check if background script is available
+        if (!chrome.runtime.sendMessage) {
+          console.warn('aiFiverr Popup: chrome.runtime.sendMessage not available');
+          resolve({ success: false, error: 'Runtime messaging not available' });
           return;
         }
 
@@ -2080,15 +2104,32 @@ class PopupManager {
         chrome.runtime.sendMessage(message, (response) => {
           clearTimeout(timeout);
 
+          // Check for runtime errors
           if (chrome.runtime.lastError) {
             const errorMessage = chrome.runtime.lastError.message || 'Unknown runtime error';
-            console.warn('aiFiverr Popup: Runtime error for', message.type, ':', errorMessage);
-            resolve({ success: false, error: errorMessage });
+
+            // Handle specific error types
+            if (errorMessage.includes('Receiving end does not exist')) {
+              console.warn('aiFiverr Popup: Background script not available for', message.type);
+              resolve({ success: false, error: 'Background script not available' });
+            } else if (errorMessage.includes('Extension context invalidated')) {
+              console.warn('aiFiverr Popup: Extension context invalidated during', message.type);
+              resolve({ success: false, error: 'Extension context invalidated' });
+            } else {
+              console.warn('aiFiverr Popup: Runtime error for', message.type, ':', errorMessage);
+              resolve({ success: false, error: errorMessage });
+            }
             return;
           }
 
-          console.log('aiFiverr Popup: Received response for', message.type, ':', response);
-          resolve(response || { success: false, error: 'No response from background script' });
+          // Handle successful response
+          if (response) {
+            console.log('aiFiverr Popup: Received response for', message.type, ':', response);
+            resolve(response);
+          } else {
+            console.warn('aiFiverr Popup: No response from background script for', message.type);
+            resolve({ success: false, error: 'No response from background script' });
+          }
         });
       } catch (error) {
         console.error('aiFiverr Popup: Failed to send message to background:', error);
@@ -3227,8 +3268,8 @@ class PopupManager {
 
   async checkAuthStatus(retryCount = 0) {
     try {
-      // Send message to background script to check auth status
-      const response = await chrome.runtime.sendMessage({
+      // Send message to background script to check auth status using safe method
+      const response = await this.sendMessageToBackground({
         type: 'GOOGLE_AUTH_STATUS'
       });
 
@@ -3846,7 +3887,7 @@ class PopupManager {
         // Convert file to base64 for message passing
         const fileData = await this.fileToBase64(file);
 
-        chrome.runtime.sendMessage({
+        const response = await this.sendMessageToBackground({
           type: 'UPLOAD_FILE_TO_DRIVE',
           file: {
             name: file.name,
@@ -3856,25 +3897,23 @@ class PopupManager {
           },
           fileName: file.name,
           description: `Knowledge base file uploaded on ${new Date().toISOString()}`
-        }, (response) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (response && response.success) {
-            // Check if refresh is required and trigger it
-            if (response.refreshRequired) {
-              console.log('aiFiverr Popup: Upload successful, triggering files refresh...');
-              // Trigger refresh after a short delay to allow Drive API to propagate
-              setTimeout(() => {
-                this.loadKnowledgeBaseFiles().catch(error => {
-                  console.warn('aiFiverr Popup: Auto-refresh after upload failed:', error);
-                });
-              }, 1000);
-            }
-            resolve(response);
-          } else {
-            reject(new Error(response?.error || 'Upload failed'));
-          }
         });
+
+        if (response && response.success) {
+          // Check if refresh is required and trigger it
+          if (response.refreshRequired) {
+            console.log('aiFiverr Popup: Upload successful, triggering files refresh...');
+            // Trigger refresh after a short delay to allow Drive API to propagate
+            setTimeout(() => {
+              this.loadKnowledgeBaseFiles().catch(error => {
+                console.warn('aiFiverr Popup: Auto-refresh after upload failed:', error);
+              });
+            }, 1000);
+          }
+          resolve(response);
+        } else {
+          reject(new Error(response?.error || 'Upload failed'));
+        }
       } catch (error) {
         reject(error);
       }
@@ -4264,47 +4303,37 @@ class PopupManager {
   }
 
   async getGoogleDriveFiles() {
-    return new Promise((resolve, reject) => {
-      try {
-        chrome.runtime.sendMessage({
-          type: 'GET_DRIVE_FILES'
-        }, (response) => {
-          if (chrome.runtime.lastError) {
-            console.warn('aiFiverr Popup: Runtime error getting Drive files:', chrome.runtime.lastError.message);
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (response && response.success) {
-            resolve(response.data || []);
-          } else {
-            reject(new Error(response?.error || 'Failed to get Drive files'));
-          }
-        });
-      } catch (error) {
-        console.error('aiFiverr Popup: Error sending message for Drive files:', error);
-        reject(error);
+    try {
+      const response = await this.sendMessageToBackground({
+        type: 'GET_DRIVE_FILES'
+      });
+
+      if (response && response.success) {
+        return response.data || [];
+      } else {
+        throw new Error(response?.error || 'Failed to get Drive files');
       }
-    });
+    } catch (error) {
+      console.error('aiFiverr Popup: Error getting Drive files:', error);
+      throw error;
+    }
   }
 
   async getGeminiFiles() {
-    return new Promise((resolve, reject) => {
-      try {
-        chrome.runtime.sendMessage({
-          type: 'GET_GEMINI_FILES'
-        }, (response) => {
-          if (chrome.runtime.lastError) {
-            console.warn('aiFiverr Popup: Runtime error getting Gemini files:', chrome.runtime.lastError.message);
-            resolve([]); // Gemini files are optional
-          } else if (response && response.success) {
-            resolve(response.data || []);
-          } else {
-            resolve([]); // Gemini files are optional
-          }
-        });
-      } catch (error) {
-        console.error('aiFiverr Popup: Error sending message for Gemini files:', error);
-        resolve([]); // Gemini files are optional
+    try {
+      const response = await this.sendMessageToBackground({
+        type: 'GET_GEMINI_FILES'
+      });
+
+      if (response && response.success) {
+        return response.data || [];
+      } else {
+        return []; // Gemini files are optional
       }
-    });
+    } catch (error) {
+      console.error('aiFiverr Popup: Error getting Gemini files:', error);
+      return []; // Gemini files are optional
+    }
   }
 
   mergeFileData(driveFiles, geminiFiles) {
@@ -5029,41 +5058,32 @@ class PopupManager {
   async getKnowledgeBaseFiles(retryCount = 0) {
     const maxRetries = 2;
 
-    return new Promise((resolve, reject) => {
-      // Add timeout to prevent hanging
-      const timeout = setTimeout(() => {
-        reject(new Error('Knowledge base files request timeout'));
-      }, 20000); // 20 second timeout
-
-      chrome.runtime.sendMessage({
+    try {
+      const response = await this.sendMessageToBackground({
         type: 'GET_DRIVE_FILES'
-      }, (response) => {
-        clearTimeout(timeout);
-        if (chrome.runtime.lastError) {
-          const error = new Error(`Chrome runtime error: ${chrome.runtime.lastError.message}`);
-          if (retryCount < maxRetries) {
-            console.warn(`Retrying getKnowledgeBaseFiles (${retryCount + 1}/${maxRetries}):`, error.message);
-            setTimeout(() => {
-              this.getKnowledgeBaseFiles(retryCount + 1).then(resolve).catch(reject);
-            }, 1000 * (retryCount + 1));
-          } else {
-            reject(error);
-          }
-        } else if (response && response.success) {
-          resolve(response.data || []);
-        } else {
-          const error = new Error(response?.error || 'Failed to get knowledge base files');
-          if (retryCount < maxRetries && (!response || response.error?.includes('timeout') || response.error?.includes('network'))) {
-            console.warn(`Retrying getKnowledgeBaseFiles (${retryCount + 1}/${maxRetries}):`, error.message);
-            setTimeout(() => {
-              this.getKnowledgeBaseFiles(retryCount + 1).then(resolve).catch(reject);
-            }, 1000 * (retryCount + 1));
-          } else {
-            reject(error);
-          }
-        }
       });
-    });
+
+      if (response && response.success) {
+        return response.data || [];
+      } else {
+        const error = new Error(response?.error || 'Failed to get knowledge base files');
+        if (retryCount < maxRetries && (!response || response.error?.includes('timeout') || response.error?.includes('network'))) {
+          console.warn(`Retrying getKnowledgeBaseFiles (${retryCount + 1}/${maxRetries}):`, error.message);
+          await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+          return this.getKnowledgeBaseFiles(retryCount + 1);
+        } else {
+          throw error;
+        }
+      }
+    } catch (error) {
+      if (retryCount < maxRetries) {
+        console.warn(`Retrying getKnowledgeBaseFiles (${retryCount + 1}/${maxRetries}):`, error.message);
+        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+        return this.getKnowledgeBaseFiles(retryCount + 1);
+      } else {
+        throw error;
+      }
+    }
   }
 
   displayKbFileSelector(files) {
