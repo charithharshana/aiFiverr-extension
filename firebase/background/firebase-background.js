@@ -14,6 +14,9 @@ let authState = {
   tokenExpiry: null
 };
 
+// Initialization state
+let isInitialized = false;
+
 // Selection counter state for badge
 let selectionCounter = 0;
 
@@ -173,9 +176,6 @@ function stopKeepAlive() {
 // Start keep-alive on initialization
 startKeepAlive();
 
-// Initialize on script load
-loadAuthState();
-
 // Enhanced message handler with better error handling
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('📨 Firebase Background: Received message:', message.type);
@@ -248,7 +248,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         success: true,
         isAuthenticated: authState.isAuthenticated,
         user: authState.userInfo,
-        userInfo: authState.userInfo // Keep both for compatibility
+        userInfo: authState.userInfo, // Keep both for compatibility
+        isInitialized: isInitialized
       });
       return false; // Sync response
 
@@ -2772,4 +2773,31 @@ async function handleSaveVariablesToDrive(message, sendResponse) {
   }
 }
 
-console.log('✅ Firebase Background: Service worker initialized successfully');
+// Initialize the background script
+async function initializeBackground() {
+  try {
+    console.log('🔄 Firebase Background: Initializing...');
+
+    // Load stored authentication state
+    await loadAuthState();
+
+    // Validate token if we have one
+    if (authState.accessToken && authState.tokenExpiry) {
+      const timeUntilExpiry = authState.tokenExpiry - Date.now();
+      if (timeUntilExpiry > 300000) { // 5 minute buffer
+        console.log('✅ Firebase Background: Valid token found, validating...');
+        await validateAndRefreshToken();
+      }
+    }
+
+    isInitialized = true;
+    console.log('✅ Firebase Background: Service worker initialized successfully');
+
+  } catch (error) {
+    console.error('❌ Firebase Background: Initialization error:', error);
+    isInitialized = true; // Set to true even on error to prevent infinite waiting
+  }
+}
+
+// Start initialization
+initializeBackground();

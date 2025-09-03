@@ -3202,7 +3202,7 @@ class PopupManager {
     }
   }
 
-  async checkAuthStatus() {
+  async checkAuthStatus(retryCount = 0) {
     try {
       // Send message to background script to check auth status
       const response = await chrome.runtime.sendMessage({
@@ -3210,18 +3210,70 @@ class PopupManager {
       });
 
       if (response && response.success) {
+        // Check if background script is still initializing
+        if (!response.isInitialized && retryCount === 0) {
+          console.log('aiFiverr: Background script still initializing, waiting...');
+          this.showAuthLoading();
+
+          setTimeout(async () => {
+            await this.checkAuthStatus(1);
+          }, 2000); // Wait 2 seconds for background script to finish initialization
+          return;
+        }
+
         this.updateAuthUI({
           isAuthenticated: response.isAuthenticated,
           user: response.user
         });
       } else {
+        // If this is the first check and we got no response, the background script might still be initializing
+        // Retry once after a short delay
+        if (retryCount === 0) {
+          console.log('aiFiverr: Auth status check failed, retrying after background script initialization...');
+          setTimeout(async () => {
+            await this.checkAuthStatus(1);
+          }, 1500); // Wait 1.5 seconds for background script to initialize
+
+          // Show loading state while waiting
+          this.showAuthLoading();
+          return;
+        }
+
         this.updateAuthUI({ isAuthenticated: false });
       }
 
     } catch (error) {
       console.error('aiFiverr: Failed to check auth status:', error);
+
+      // If this is the first attempt and we got an error, retry once
+      if (retryCount === 0) {
+        console.log('aiFiverr: Auth status check error, retrying...');
+        setTimeout(async () => {
+          await this.checkAuthStatus(1);
+        }, 1500);
+
+        this.showAuthLoading();
+        return;
+      }
+
       this.updateAuthUI({ isAuthenticated: false });
     }
+  }
+
+  showAuthLoading() {
+    const authStatusEl = document.getElementById('authStatus');
+    const notAuthenticatedEl = document.getElementById('authNotAuthenticated');
+    const authenticatedEl = document.getElementById('authAuthenticated');
+
+    // Show loading state
+    if (authStatusEl) {
+      authStatusEl.style.display = 'block';
+      authStatusEl.textContent = 'Checking authentication...';
+    }
+
+    // Hide other states
+    if (notAuthenticatedEl) notAuthenticatedEl.style.display = 'none';
+    if (authenticatedEl) authenticatedEl.style.display = 'none';
   }
 
   updateAuthUI(authStatus) {
