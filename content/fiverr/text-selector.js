@@ -212,16 +212,16 @@ class TextSelector {
       if (!isDuplicate) {
         // Add separator and append new selection
         this.selectedText += '\n\n---\n\n' + selectedText;
-        console.log('aiFiverr: Appended new selection to existing conversation. Total length:', this.selectedText.length);
+        // Appended new selection to existing conversation
       } else {
-        console.log('aiFiverr: Duplicate content detected, skipping append. Content already exists in conversation.');
+        // Duplicate content detected, skipping append
         // Show brief notification to user
         this.showToast('Duplicate content detected - not added to conversation', 'warning');
       }
     } else {
       // First selection
       this.selectedText = selectedText;
-      console.log('aiFiverr: First selection added to conversation');
+      // First selection added to conversation
     }
 
     // Update badge counter for each selection (including first and subsequent)
@@ -1160,9 +1160,9 @@ class TextSelector {
         });
       }
 
-      // Add other custom prompts (limit to avoid overwhelming)
+      // Add other custom prompts (show all prompts)
       const otherPrompts = Object.keys(prompts).filter(key => !favoritePrompts.includes(key));
-      otherPrompts.slice(0, 5).forEach(promptKey => {
+      otherPrompts.forEach(promptKey => {
         const prompt = prompts[promptKey];
         if (prompt) {
           const item = this.createDropdownItem(promptKey, prompt);
@@ -1170,7 +1170,7 @@ class TextSelector {
         }
       });
 
-      console.log('aiFiverr: Floating icon dropdown populated with', this.contextMenu.children.length, 'items (custom prompts only)');
+      // Floating icon dropdown populated with custom prompts
 
     } catch (error) {
       console.error('aiFiverr: Failed to populate dropdown:', error);
@@ -3037,6 +3037,13 @@ class TextSelector {
    */
   showErrorMessage(message) {
     this.showToastMessage(message, 'error');
+  }
+
+  /**
+   * Show toast message (wrapper for showToastMessage)
+   */
+  showToast(message, type = 'info') {
+    this.showToastMessage(message, type);
   }
 
   /**

@@ -1072,8 +1072,6 @@ class StreamingChatbox {
    * Stream a response from the AI
    */
   async streamResponse() {
-    console.log('aiFiverr StreamingChatbox: Starting stream response');
-
     this.isStreaming = true;
     this.sendButton.disabled = true;
     this.updateStatus('AI is thinking...', '');
@@ -1085,7 +1083,6 @@ class StreamingChatbox {
     try {
       // Use direct API call with full conversation context
       await this.streamWithFullContext();
-      console.log('aiFiverr StreamingChatbox: Stream response completed successfully');
 
     } catch (error) {
       console.error('aiFiverr StreamingChatbox: Streaming error:', error);
@@ -1101,7 +1098,6 @@ class StreamingChatbox {
 
       this.currentStreamingMessage = null;
       this.updateStatus('Ready to chat', 'success');
-      console.log('aiFiverr StreamingChatbox: Stream response cleanup completed');
     }
   }
 
@@ -1225,8 +1221,7 @@ class StreamingChatbox {
       }
     }
 
-    console.log('aiFiverr StreamingChatbox: Making streaming request with model:', model);
-    console.log('aiFiverr StreamingChatbox: Conversation history length:', this.conversationHistory.length);
+    // Making streaming request with conversation history
 
     // Use SSE format like the working example
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`, {

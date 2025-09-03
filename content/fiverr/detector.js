@@ -285,7 +285,7 @@ class FiverrDetector {
     });
 
     this.detectedElements.set('messages', validElements);
-    console.log('aiFiverr: Detected message elements:', validElements.length);
+    // Detected message elements
     return validElements;
   }
 
