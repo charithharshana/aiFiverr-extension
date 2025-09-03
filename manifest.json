@@ -58,6 +58,7 @@
         "content/utils/helpers.js",
         "content/utils/storage.js",
         "content/utils/export-import.js",
+        "content/utils/backup-sync-manager.js",
         "content/utils/prompt-selector.js",
         "content/utils/markdown-renderer.js",
         "content/utils/advanced-editor.js",

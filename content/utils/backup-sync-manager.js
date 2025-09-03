@@ -1,467 +1,243 @@
 /**
- * Backup and Sync Manager for aiFiverr Extension
- * Handles export/import of custom prompts and variables to/from local files and Google Drive
+ * Backup and Sync Manager
+ * Handles backup and synchronization of custom prompts and variables
+ * Supports local export/import and Google Drive sync
  */
 
 class BackupSyncManager {
   constructor() {
-    this.storageManager = window.storageManager;
-    this.googleDriveClient = window.googleDriveClient;
-    this.exportVersion = '1.0.0';
-    this.supportedFormats = ['json', 'markdown'];
+    this.version = '1.0.0';
+    this.activityLog = [];
+    this.maxLogEntries = 50;
+    this.isInitialized = false;
+    this.googleDriveClient = null;
+    this.storageManager = null;
+    this.knowledgeBaseManager = null;
+    
+    this.init();
   }
 
-  /**
-   * Initialize the backup sync manager
-   */
-  async initialize() {
+  async init() {
     try {
-      if (!this.storageManager) {
-        console.warn('aiFiverr Backup: Storage manager not available');
-        return false;
-      }
+      // Wait for dependencies to be available
+      await this.waitForDependencies();
 
-      // Set up authentication listener for auto-sync
-      this.setupAuthListener();
+      this.googleDriveClient = window.googleDriveClient;
+      this.storageManager = window.storageManager;
+      this.knowledgeBaseManager = window.knowledgeBaseManager;
 
-      console.log('aiFiverr Backup: Backup Sync Manager initialized');
-      return true;
+      // Load activity log
+      await this.loadActivityLog();
+
+      // Set up authentication listeners for auto-sync
+      this.setupAuthListeners();
+
+      this.isInitialized = true;
+      this.logActivity('system', 'BackupSyncManager initialized successfully');
+
+      console.log('aiFiverr BackupSync: Manager initialized successfully');
     } catch (error) {
-      console.error('aiFiverr Backup: Failed to initialize:', error);
-      return false;
+      console.error('aiFiverr BackupSync: Failed to initialize:', error);
+      this.logActivity('error', `Initialization failed: ${error.message}`);
     }
   }
 
-  /**
-   * Set up authentication listener for auto-sync
-   */
-  setupAuthListener() {
-    try {
-      // Check if Google Auth Service is available
-      if (window.googleAuthService && typeof window.googleAuthService.addAuthListener === 'function') {
-        // Add listener for authentication state changes
-        window.googleAuthService.addAuthListener(async (authState) => {
-          if (authState.isAuthenticated && authState.user) {
-            console.log('aiFiverr Backup: User authenticated, triggering auto-sync');
+  async waitForDependencies() {
+    const maxWait = 10000; // 10 seconds
+    const checkInterval = 100; // 100ms
+    let waited = 0;
 
-            // Delay auto-sync slightly to ensure all services are ready
-            setTimeout(async () => {
-              try {
-                const result = await this.autoSyncOnAuth();
-                console.log('aiFiverr Backup: Auto-sync completed:', result);
-              } catch (error) {
-                console.error('aiFiverr Backup: Auto-sync failed:', error);
-              }
-            }, 2000); // 2 second delay
-          }
-        });
-
-        console.log('aiFiverr Backup: Authentication listener registered');
-      } else {
-        console.warn('aiFiverr Backup: Google Auth Service not available for auto-sync');
+    while (waited < maxWait) {
+      if (window.googleDriveClient && window.storageManager && window.knowledgeBaseManager) {
+        return;
       }
-    } catch (error) {
-      console.error('aiFiverr Backup: Failed to setup auth listener:', error);
+      await new Promise(resolve => setTimeout(resolve, checkInterval));
+      waited += checkInterval;
     }
+    
+    throw new Error('Required dependencies not available after timeout');
   }
 
   /**
-   * Export custom prompts and variables to local file
+   * Export custom prompts and variables to local files
    */
-  async exportToLocal(format = 'json', options = {}) {
+  async exportToLocal(format = 'json') {
     try {
-      console.log('aiFiverr Backup: Starting local export in format:', format);
-
-      // Get current custom prompts and variables
-      const exportData = await this.gatherExportData();
-
-      // Format the data based on requested format
-      const formattedData = await this.formatExportData(exportData, format, options);
-
-      // Create and download the file
-      await this.downloadFile(formattedData.content, formattedData.filename, formattedData.mimeType);
-
-      console.log('aiFiverr Backup: Local export completed successfully');
-      return {
-        success: true,
-        filename: formattedData.filename,
-        format: format,
-        itemCount: this.getExportItemCount(exportData)
-      };
-
-    } catch (error) {
-      console.error('aiFiverr Backup: Local export failed:', error);
-      throw new Error(`Export failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Import custom prompts and variables from local file
-   */
-  async importFromLocal(fileContent, options = {}) {
-    try {
-      console.log('aiFiverr Backup: Starting local import');
-
-      // Parse the import data
-      const importData = await this.parseImportData(fileContent);
-
-      // Validate the import data
-      if (!this.validateImportData(importData)) {
-        throw new Error('Invalid import data structure');
+      if (!this.isInitialized) {
+        throw new Error('BackupSyncManager not initialized');
       }
 
-      // Check for conflicts if not forcing import
-      const conflicts = await this.detectConflicts(importData);
-      if (conflicts.length > 0 && !options.forceImport) {
-        return {
-          success: false,
-          conflicts: conflicts,
-          requiresUserDecision: true
-        };
-      }
-
-      // Perform the import
-      const results = await this.performImport(importData, options);
-
-      console.log('aiFiverr Backup: Local import completed successfully');
-      return {
-        success: true,
-        results: results
-      };
-
-    } catch (error) {
-      console.error('aiFiverr Backup: Local import failed:', error);
-      throw new Error(`Import failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Sync to Google Drive
-   */
-  async syncToGoogleDrive() {
-    try {
-      console.log('aiFiverr Backup: Starting Google Drive sync');
-
-      if (!this.googleDriveClient) {
-        throw new Error('Google Drive client not available');
-      }
-
-      // Check authentication
-      const authResult = await this.googleDriveClient.testConnection();
-      if (!authResult.success) {
-        throw new Error('Google Drive authentication required');
-      }
+      this.logActivity('export', `Starting local export in ${format} format`);
 
       // Get current data
-      const exportData = await this.gatherExportData();
+      const exportData = await this.prepareExportData();
+      
+      let content, filename, mimeType;
 
-      // Create backup file
-      const backupData = {
-        version: this.exportVersion,
-        timestamp: Date.now(),
-        type: 'aifiverr-settings-backup',
-        data: exportData
-      };
+      switch (format.toLowerCase()) {
+        case 'json':
+          content = JSON.stringify(exportData, null, 2);
+          filename = `aifiverr-settings-backup-${this.getDateString()}.json`;
+          mimeType = 'application/json';
+          break;
+          
+        case 'markdown':
+          content = this.convertToMarkdown(exportData);
+          filename = `aifiverr-settings-backup-${this.getDateString()}.md`;
+          mimeType = 'text/markdown';
+          break;
+          
+        default:
+          throw new Error(`Unsupported export format: ${format}`);
+      }
 
-      const fileName = `aifiverr-settings-backup-${new Date().toISOString().split('T')[0]}.json`;
-      const description = 'aiFiverr custom prompts and variables backup';
-
-      // Save to Google Drive
-      await this.googleDriveClient.saveDataFile(fileName, backupData, description);
-
-      console.log('aiFiverr Backup: Google Drive sync completed successfully');
+      this.logActivity('export', `Local export completed: ${filename}`);
+      
       return {
-        success: true,
-        filename: fileName,
-        timestamp: backupData.timestamp
+        content,
+        filename,
+        mimeType,
+        size: content.length
       };
 
     } catch (error) {
-      console.error('aiFiverr Backup: Google Drive sync failed:', error);
-      throw new Error(`Google Drive sync failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Restore from Google Drive
-   */
-  async restoreFromGoogleDrive(options = {}) {
-    try {
-      console.log('aiFiverr Backup: Starting Google Drive restore');
-
-      if (!this.googleDriveClient) {
-        throw new Error('Google Drive client not available');
-      }
-
-      // Check authentication
-      const authResult = await this.googleDriveClient.testConnection();
-      if (!authResult.success) {
-        throw new Error('Google Drive authentication required');
-      }
-
-      // Find the most recent backup file
-      const backupFile = await this.findLatestBackupFile();
-      if (!backupFile) {
-        return {
-          success: false,
-          message: 'No backup files found in Google Drive'
-        };
-      }
-
-      // Download and parse the backup
-      const blob = await this.googleDriveClient.downloadFile(backupFile.id);
-      const text = await blob.text();
-      const backupData = JSON.parse(text);
-
-      // Check for conflicts if not forcing restore
-      const conflicts = await this.detectConflicts(backupData.data);
-      if (conflicts.length > 0 && !options.forceRestore) {
-        return {
-          success: false,
-          conflicts: conflicts,
-          requiresUserDecision: true,
-          backupInfo: {
-            filename: backupFile.name,
-            timestamp: backupData.timestamp,
-            version: backupData.version
-          }
-        };
-      }
-
-      // Perform the restore
-      const results = await this.performImport(backupData.data, options);
-
-      console.log('aiFiverr Backup: Google Drive restore completed successfully');
-      return {
-        success: true,
-        results: results,
-        backupInfo: {
-          filename: backupFile.name,
-          timestamp: backupData.timestamp,
-          version: backupData.version
-        }
-      };
-
-    } catch (error) {
-      console.error('aiFiverr Backup: Google Drive restore failed:', error);
-      throw new Error(`Google Drive restore failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Auto-sync on authentication (called when user authenticates with Google)
-   */
-  async autoSyncOnAuth() {
-    try {
-      console.log('aiFiverr Backup: Starting auto-sync on authentication');
-
-      // First, try to restore from Google Drive if local data is empty
-      const currentData = await this.gatherExportData();
-      const hasLocalData = this.hasSignificantData(currentData);
-
-      if (!hasLocalData) {
-        console.log('aiFiverr Backup: No local data found, attempting restore from Google Drive');
-        const restoreResult = await this.restoreFromGoogleDrive({ forceRestore: true });
-        if (restoreResult.success) {
-          console.log('aiFiverr Backup: Successfully restored data from Google Drive');
-          return { restored: true, synced: false };
-        }
-      }
-
-      // Then sync current data to Google Drive
-      const syncResult = await this.syncToGoogleDrive();
-      if (syncResult.success) {
-        console.log('aiFiverr Backup: Successfully synced data to Google Drive');
-        return { restored: false, synced: true };
-      }
-
-      return { restored: false, synced: false };
-
-    } catch (error) {
-      console.error('aiFiverr Backup: Auto-sync failed:', error);
-      return { restored: false, synced: false, error: error.message };
-    }
-  }
-
-  /**
-   * Get sync status information
-   */
-  async getSyncStatus() {
-    try {
-      const status = {
-        googleDriveConnected: false,
-        lastBackupDate: null,
-        localDataCount: 0,
-        cloudDataAvailable: false
-      };
-
-      // Check Google Drive connection
-      if (this.googleDriveClient) {
-        const authResult = await this.googleDriveClient.testConnection();
-        status.googleDriveConnected = authResult.success;
-
-        if (status.googleDriveConnected) {
-          // Check for existing backup files
-          const backupFile = await this.findLatestBackupFile();
-          if (backupFile) {
-            status.cloudDataAvailable = true;
-            status.lastBackupDate = new Date(backupFile.modifiedTime);
-          }
-        }
-      }
-
-      // Count local data
-      const localData = await this.gatherExportData();
-      status.localDataCount = this.getExportItemCount(localData);
-
-      return status;
-
-    } catch (error) {
-      console.error('aiFiverr Backup: Failed to get sync status:', error);
-      return {
-        googleDriveConnected: false,
-        lastBackupDate: null,
-        localDataCount: 0,
-        cloudDataAvailable: false,
-        error: error.message
-      };
-    }
-  }
-
-  // ===== HELPER METHODS =====
-
-  /**
-   * Gather all export data (custom prompts and variables)
-   */
-  async gatherExportData() {
-    try {
-      const data = {
-        customPrompts: {},
-        knowledgeBaseVariables: {}
-      };
-
-      // Get custom prompts
-      const customPromptsResult = await this.storageManager.get('customPrompts');
-      data.customPrompts = customPromptsResult.customPrompts || {};
-
-      // Get knowledge base variables
-      const knowledgeBaseResult = await this.storageManager.get('knowledgeBase');
-      data.knowledgeBaseVariables = knowledgeBaseResult.knowledgeBase || {};
-
-      console.log('aiFiverr Backup: Gathered export data:', {
-        customPrompts: Object.keys(data.customPrompts).length,
-        knowledgeBaseVariables: Object.keys(data.knowledgeBaseVariables).length
-      });
-
-      return data;
-
-    } catch (error) {
-      console.error('aiFiverr Backup: Failed to gather export data:', error);
+      this.logActivity('error', `Local export failed: ${error.message}`);
       throw error;
     }
   }
 
   /**
-   * Format export data based on requested format
+   * Import backup data from file content
    */
-  async formatExportData(data, format, options = {}) {
-    const timestamp = new Date().toISOString().split('T')[0];
+  async importFromLocal(fileContent, options = {}) {
+    try {
+      if (!this.isInitialized) {
+        throw new Error('BackupSyncManager not initialized');
+      }
 
-    switch (format.toLowerCase()) {
-      case 'json':
-        return this.formatAsJSON(data, timestamp, options);
-      case 'markdown':
-        return this.formatAsMarkdown(data, timestamp, options);
-      default:
-        throw new Error(`Unsupported export format: ${format}`);
+      this.logActivity('import', 'Starting local import');
+
+      // Parse and validate import data
+      const importData = this.parseImportData(fileContent);
+      this.validateImportData(importData);
+
+      // Check for conflicts
+      const conflicts = await this.detectConflicts(importData);
+      
+      if (conflicts.length > 0 && !options.forceOverwrite) {
+        this.logActivity('import', `Import paused: ${conflicts.length} conflicts detected`);
+        return {
+          success: false,
+          conflicts,
+          requiresUserDecision: true,
+          importData
+        };
+      }
+
+      // Apply import
+      await this.applyImportData(importData, options);
+      
+      this.logActivity('import', 'Local import completed successfully');
+      
+      return {
+        success: true,
+        imported: {
+          customPrompts: Object.keys(importData.customPrompts || {}).length,
+          variables: Object.keys(importData.knowledgeBase || {}).length
+        }
+      };
+
+    } catch (error) {
+      this.logActivity('error', `Local import failed: ${error.message}`);
+      throw error;
     }
   }
 
   /**
-   * Format data as JSON
+   * Sync with Google Drive
    */
-  formatAsJSON(data, timestamp, options = {}) {
-    const exportData = {
-      version: this.exportVersion,
+  async syncWithGoogleDrive(direction = 'auto') {
+    try {
+      if (!this.isInitialized) {
+        throw new Error('BackupSyncManager not initialized');
+      }
+
+      if (!this.googleDriveClient || !await this.googleDriveClient.isAuthenticated()) {
+        throw new Error('Google Drive authentication required');
+      }
+
+      this.logActivity('sync', `Starting Google Drive sync (${direction})`);
+
+      const localData = await this.prepareExportData();
+      const cloudData = await this.loadFromGoogleDrive();
+
+      let syncResult;
+
+      switch (direction) {
+        case 'upload':
+          syncResult = await this.uploadToGoogleDrive(localData);
+          break;
+          
+        case 'download':
+          syncResult = await this.downloadFromGoogleDrive(cloudData);
+          break;
+          
+        case 'auto':
+        default:
+          syncResult = await this.performAutoSync(localData, cloudData);
+          break;
+      }
+
+      this.logActivity('sync', `Google Drive sync completed: ${syncResult.action}`);
+      return syncResult;
+
+    } catch (error) {
+      this.logActivity('error', `Google Drive sync failed: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Prepare export data structure
+   */
+  async prepareExportData() {
+    const customPrompts = await this.storageManager.get('customPrompts');
+    const knowledgeBase = await this.storageManager.getKnowledgeBase();
+    
+    return {
+      version: this.version,
       timestamp: Date.now(),
-      exportDate: timestamp,
-      type: 'aifiverr-settings-export',
-      data: data
-    };
-
-    return {
-      content: JSON.stringify(exportData, null, 2),
-      filename: `aifiverr-settings-${timestamp}.json`,
-      mimeType: 'application/json'
-    };
-  }
-
-  /**
-   * Format data as Markdown
-   */
-  formatAsMarkdown(data, timestamp, options = {}) {
-    let markdown = `# aiFiverr Settings Export\n\n`;
-    markdown += `**Export Date:** ${new Date().toLocaleString()}\n`;
-    markdown += `**Version:** ${this.exportVersion}\n\n`;
-
-    // Custom Prompts section
-    if (data.customPrompts && Object.keys(data.customPrompts).length > 0) {
-      markdown += `## Custom Prompts (${Object.keys(data.customPrompts).length})\n\n`;
-
-      Object.entries(data.customPrompts).forEach(([key, prompt]) => {
-        markdown += `### ${prompt.name || key}\n\n`;
-        if (prompt.description) {
-          markdown += `**Description:** ${prompt.description}\n\n`;
-        }
-        markdown += `**Prompt:**\n\`\`\`\n${prompt.prompt || ''}\n\`\`\`\n\n`;
-        if (prompt.knowledgeBaseFiles && prompt.knowledgeBaseFiles.length > 0) {
-          markdown += `**Knowledge Base Files:** ${prompt.knowledgeBaseFiles.join(', ')}\n\n`;
-        }
-        markdown += `**Created:** ${new Date(prompt.created || 0).toLocaleString()}\n`;
-        markdown += `**Modified:** ${new Date(prompt.modified || 0).toLocaleString()}\n\n`;
-        markdown += `---\n\n`;
-      });
-    }
-
-    // Knowledge Base Variables section
-    if (data.knowledgeBaseVariables && Object.keys(data.knowledgeBaseVariables).length > 0) {
-      markdown += `## Knowledge Base Variables (${Object.keys(data.knowledgeBaseVariables).length})\n\n`;
-
-      Object.entries(data.knowledgeBaseVariables).forEach(([key, value]) => {
-        markdown += `### {{${key}}}\n\n`;
-        markdown += `\`\`\`\n${value}\n\`\`\`\n\n`;
-      });
-    }
-
-    return {
-      content: markdown,
-      filename: `aifiverr-settings-${timestamp}.md`,
-      mimeType: 'text/markdown'
+      exportType: 'aifiverr-settings-backup',
+      customPrompts: customPrompts.customPrompts || {},
+      knowledgeBase: knowledgeBase || {},
+      metadata: {
+        exportedAt: new Date().toISOString(),
+        totalPrompts: Object.keys(customPrompts.customPrompts || {}).length,
+        totalVariables: Object.keys(knowledgeBase || {}).length
+      }
     };
   }
 
   /**
    * Parse import data from file content
    */
-  async parseImportData(fileContent) {
+  parseImportData(fileContent) {
     try {
-      // Try to parse as JSON first
-      const importData = JSON.parse(fileContent);
-
-      // If it's a direct export, return the data section
-      if (importData.type === 'aifiverr-settings-export' && importData.data) {
-        return importData.data;
+      // Try JSON first
+      return JSON.parse(fileContent);
+    } catch (jsonError) {
+      // Try to detect if it's markdown and extract JSON
+      if (fileContent.includes('```json')) {
+        const jsonMatch = fileContent.match(/```json\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+          try {
+            return JSON.parse(jsonMatch[1]);
+          } catch (markdownJsonError) {
+            throw new Error('Invalid JSON in markdown format');
+          }
+        }
       }
-
-      // If it's already in the expected format, return as is
-      if (importData.customPrompts || importData.knowledgeBaseVariables) {
-        return importData;
-      }
-
-      throw new Error('Unrecognized import data format');
-
-    } catch (parseError) {
-      throw new Error('Invalid import file format. Please provide a valid JSON export file.');
+      throw new Error('Invalid import file format. Please provide a valid JSON backup file.');
     }
   }
 
@@ -470,203 +246,492 @@ class BackupSyncManager {
    */
   validateImportData(data) {
     if (!data || typeof data !== 'object') {
-      return false;
+      throw new Error('Invalid import data structure');
     }
 
-    // Check if it has at least one of the expected sections
-    const hasCustomPrompts = data.customPrompts && typeof data.customPrompts === 'object';
-    const hasVariables = data.knowledgeBaseVariables && typeof data.knowledgeBaseVariables === 'object';
+    if (!data.exportType || data.exportType !== 'aifiverr-settings-backup') {
+      throw new Error('Invalid backup file type');
+    }
 
-    return hasCustomPrompts || hasVariables;
+    if (!data.version) {
+      throw new Error('Missing version information');
+    }
+
+    // Check version compatibility
+    if (!this.isVersionCompatible(data.version)) {
+      throw new Error(`Incompatible backup version: ${data.version}`);
+    }
+
+    return true;
+  }
+
+  /**
+   * Check version compatibility
+   */
+  isVersionCompatible(version) {
+    const [major] = version.split('.').map(Number);
+    const [currentMajor] = this.version.split('.').map(Number);
+    
+    return major <= currentMajor;
   }
 
   /**
    * Detect conflicts between import data and existing data
    */
   async detectConflicts(importData) {
-    try {
-      const conflicts = [];
-      const currentData = await this.gatherExportData();
+    const conflicts = [];
+    
+    // Check custom prompts conflicts
+    const existingPrompts = await this.storageManager.get('customPrompts');
+    const currentPrompts = existingPrompts.customPrompts || {};
+    
+    Object.keys(importData.customPrompts || {}).forEach(key => {
+      if (currentPrompts[key]) {
+        conflicts.push({
+          type: 'customPrompt',
+          key,
+          current: currentPrompts[key],
+          incoming: importData.customPrompts[key]
+        });
+      }
+    });
 
-      // Check custom prompts conflicts
-      if (importData.customPrompts) {
+    // Check knowledge base variables conflicts
+    const currentKB = await this.storageManager.getKnowledgeBase();
+    
+    Object.keys(importData.knowledgeBase || {}).forEach(key => {
+      if (currentKB[key]) {
+        conflicts.push({
+          type: 'variable',
+          key,
+          current: currentKB[key],
+          incoming: importData.knowledgeBase[key]
+        });
+      }
+    });
+
+    return conflicts;
+  }
+
+  /**
+   * Apply import data to storage
+   */
+  async applyImportData(importData, options = {}) {
+    const { mergeStrategy = 'overwrite' } = options;
+
+    // Import custom prompts
+    if (importData.customPrompts) {
+      const existingPrompts = await this.storageManager.get('customPrompts');
+      let updatedPrompts = existingPrompts.customPrompts || {};
+
+      if (mergeStrategy === 'overwrite') {
+        updatedPrompts = { ...updatedPrompts, ...importData.customPrompts };
+      } else if (mergeStrategy === 'skip') {
         Object.keys(importData.customPrompts).forEach(key => {
-          if (currentData.customPrompts[key]) {
-            conflicts.push({
-              type: 'customPrompt',
-              key: key,
-              name: importData.customPrompts[key].name || key,
-              current: currentData.customPrompts[key],
-              incoming: importData.customPrompts[key]
-            });
+          if (!updatedPrompts[key]) {
+            updatedPrompts[key] = importData.customPrompts[key];
           }
         });
       }
 
-      // Check knowledge base variables conflicts
-      if (importData.knowledgeBaseVariables) {
-        Object.keys(importData.knowledgeBaseVariables).forEach(key => {
-          if (currentData.knowledgeBaseVariables[key]) {
-            conflicts.push({
-              type: 'knowledgeBaseVariable',
-              key: key,
-              name: key,
-              current: currentData.knowledgeBaseVariables[key],
-              incoming: importData.knowledgeBaseVariables[key]
-            });
+      await this.storageManager.set({ customPrompts: updatedPrompts });
+      
+      // Update knowledge base manager
+      if (this.knowledgeBaseManager) {
+        this.knowledgeBaseManager.customPrompts.clear();
+        Object.entries(updatedPrompts).forEach(([key, prompt]) => {
+          this.knowledgeBaseManager.customPrompts.set(key, prompt);
+        });
+      }
+    }
+
+    // Import knowledge base variables
+    if (importData.knowledgeBase) {
+      const currentKB = await this.storageManager.getKnowledgeBase();
+      let updatedKB = { ...currentKB };
+
+      if (mergeStrategy === 'overwrite') {
+        updatedKB = { ...updatedKB, ...importData.knowledgeBase };
+      } else if (mergeStrategy === 'skip') {
+        Object.keys(importData.knowledgeBase).forEach(key => {
+          if (!updatedKB[key]) {
+            updatedKB[key] = importData.knowledgeBase[key];
           }
         });
       }
 
-      return conflicts;
-
-    } catch (error) {
-      console.error('aiFiverr Backup: Failed to detect conflicts:', error);
-      return [];
+      await this.storageManager.saveKnowledgeBase(updatedKB);
+      
+      // Update knowledge base manager
+      if (this.knowledgeBaseManager) {
+        this.knowledgeBaseManager.variables.clear();
+        Object.entries(updatedKB).forEach(([key, value]) => {
+          this.knowledgeBaseManager.variables.set(key, value);
+        });
+      }
     }
   }
 
   /**
-   * Perform the actual import operation
+   * Convert export data to markdown format
    */
-  async performImport(importData, options = {}) {
+  convertToMarkdown(exportData) {
+    let markdown = `# aiFiverr Settings Backup\n\n`;
+    markdown += `**Exported:** ${new Date(exportData.timestamp).toLocaleString()}\n`;
+    markdown += `**Version:** ${exportData.version}\n\n`;
+
+    // Custom Prompts section
+    markdown += `## Custom Prompts (${exportData.metadata.totalPrompts})\n\n`;
+    
+    Object.entries(exportData.customPrompts || {}).forEach(([key, prompt]) => {
+      markdown += `### ${prompt.name || key}\n\n`;
+      if (prompt.description) {
+        markdown += `**Description:** ${prompt.description}\n\n`;
+      }
+      markdown += `**Prompt:**\n\`\`\`\n${prompt.prompt || ''}\n\`\`\`\n\n`;
+      if (prompt.knowledgeBaseFiles && prompt.knowledgeBaseFiles.length > 0) {
+        markdown += `**Files:** ${prompt.knowledgeBaseFiles.join(', ')}\n\n`;
+      }
+      markdown += `---\n\n`;
+    });
+
+    // Variables section
+    markdown += `## Knowledge Base Variables (${exportData.metadata.totalVariables})\n\n`;
+    
+    Object.entries(exportData.knowledgeBase || {}).forEach(([key, value]) => {
+      markdown += `**${key}:** ${value}\n\n`;
+    });
+
+    // Include JSON data for re-import
+    markdown += `## Raw Data (for import)\n\n`;
+    markdown += `\`\`\`json\n${JSON.stringify(exportData, null, 2)}\n\`\`\`\n`;
+
+    return markdown;
+  }
+
+  /**
+   * Get formatted date string for filenames
+   */
+  getDateString() {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  /**
+   * Log activity with timestamp
+   */
+  logActivity(type, message) {
+    const entry = {
+      timestamp: Date.now(),
+      type,
+      message,
+      date: new Date().toISOString()
+    };
+
+    this.activityLog.unshift(entry);
+    
+    // Keep only recent entries
+    if (this.activityLog.length > this.maxLogEntries) {
+      this.activityLog = this.activityLog.slice(0, this.maxLogEntries);
+    }
+
+    // Save to storage
+    this.saveActivityLog();
+  }
+
+  /**
+   * Get recent activity log
+   */
+  getActivityLog(limit = 10) {
+    return this.activityLog.slice(0, limit);
+  }
+
+  /**
+   * Save activity log to storage
+   */
+  async saveActivityLog() {
     try {
-      const results = {
-        customPrompts: 0,
-        knowledgeBaseVariables: 0,
-        errors: []
+      if (this.storageManager) {
+        await this.storageManager.set({ backupActivityLog: this.activityLog });
+      }
+    } catch (error) {
+      console.error('aiFiverr BackupSync: Failed to save activity log:', error);
+    }
+  }
+
+  /**
+   * Load activity log from storage
+   */
+  async loadActivityLog() {
+    try {
+      if (this.storageManager) {
+        const result = await this.storageManager.get('backupActivityLog');
+        this.activityLog = result.backupActivityLog || [];
+      }
+    } catch (error) {
+      console.error('aiFiverr BackupSync: Failed to load activity log:', error);
+      this.activityLog = [];
+    }
+  }
+
+  /**
+   * Upload backup data to Google Drive
+   */
+  async uploadToGoogleDrive(exportData) {
+    try {
+      const fileName = `aifiverr-settings-backup-${this.getDateString()}.json`;
+      const jsonData = JSON.stringify(exportData, null, 2);
+
+      const result = await this.googleDriveClient.saveDataFile(
+        fileName,
+        exportData,
+        'aiFiverr settings backup'
+      );
+
+      return {
+        success: true,
+        action: 'uploaded',
+        fileId: result.id,
+        fileName,
+        size: jsonData.length
       };
-
-      // Import custom prompts
-      if (importData.customPrompts) {
-        try {
-          const currentPrompts = await this.storageManager.get('customPrompts');
-          const mergedPrompts = options.replaceExisting
-            ? importData.customPrompts
-            : { ...currentPrompts.customPrompts || {}, ...importData.customPrompts };
-
-          await this.storageManager.set({ customPrompts: mergedPrompts });
-          results.customPrompts = Object.keys(importData.customPrompts).length;
-
-          console.log('aiFiverr Backup: Imported custom prompts:', results.customPrompts);
-        } catch (error) {
-          results.errors.push(`Custom prompts import failed: ${error.message}`);
-        }
-      }
-
-      // Import knowledge base variables
-      if (importData.knowledgeBaseVariables) {
-        try {
-          const currentVariables = await this.storageManager.get('knowledgeBase');
-          const mergedVariables = options.replaceExisting
-            ? importData.knowledgeBaseVariables
-            : { ...currentVariables.knowledgeBase || {}, ...importData.knowledgeBaseVariables };
-
-          await this.storageManager.set({ knowledgeBase: mergedVariables });
-          results.knowledgeBaseVariables = Object.keys(importData.knowledgeBaseVariables).length;
-
-          console.log('aiFiverr Backup: Imported knowledge base variables:', results.knowledgeBaseVariables);
-        } catch (error) {
-          results.errors.push(`Knowledge base variables import failed: ${error.message}`);
-        }
-      }
-
-      // Trigger reload of managers if they exist
-      if (window.knowledgeBaseManager) {
-        await window.knowledgeBaseManager.loadKnowledgeBase();
-        await window.knowledgeBaseManager.loadCustomPrompts();
-      }
-
-      return results;
-
     } catch (error) {
-      console.error('aiFiverr Backup: Import operation failed:', error);
-      throw error;
+      throw new Error(`Google Drive upload failed: ${error.message}`);
     }
   }
 
   /**
-   * Find the latest backup file in Google Drive
+   * Load backup data from Google Drive
    */
-  async findLatestBackupFile() {
+  async loadFromGoogleDrive() {
     try {
-      if (!this.googleDriveClient) {
+      // List backup files in Google Drive
+      const files = await this.googleDriveClient.listFiles();
+      const backupFiles = files.filter(file =>
+        file.name.startsWith('aifiverr-settings-backup-') &&
+        file.name.endsWith('.json')
+      );
+
+      if (backupFiles.length === 0) {
         return null;
       }
 
-      // Search for backup files
-      const files = await this.googleDriveClient.searchFiles('aifiverr-settings-backup');
+      // Get the most recent backup file
+      const latestFile = backupFiles.sort((a, b) =>
+        new Date(b.modifiedTime) - new Date(a.modifiedTime)
+      )[0];
 
-      if (files.length === 0) {
-        return null;
-      }
+      // Download and parse the file
+      const fileBlob = await this.googleDriveClient.downloadFile(latestFile.id);
+      const fileContent = await fileBlob.text();
 
-      // Return the most recent file
-      return files.sort((a, b) => new Date(b.modifiedTime) - new Date(a.modifiedTime))[0];
-
+      return {
+        data: JSON.parse(fileContent),
+        fileInfo: latestFile
+      };
     } catch (error) {
-      console.error('aiFiverr Backup: Failed to find backup files:', error);
+      console.error('aiFiverr BackupSync: Failed to load from Google Drive:', error);
       return null;
     }
   }
 
   /**
-   * Check if data contains significant content
+   * Download and apply backup from Google Drive
    */
-  hasSignificantData(data) {
-    const promptCount = data.customPrompts ? Object.keys(data.customPrompts).length : 0;
-    const variableCount = data.knowledgeBaseVariables ? Object.keys(data.knowledgeBaseVariables).length : 0;
+  async downloadFromGoogleDrive(cloudData) {
+    if (!cloudData) {
+      throw new Error('No backup data found in Google Drive');
+    }
 
-    return promptCount > 0 || variableCount > 0;
+    await this.applyImportData(cloudData.data, { mergeStrategy: 'overwrite' });
+
+    return {
+      success: true,
+      action: 'downloaded',
+      fileName: cloudData.fileInfo.name,
+      timestamp: cloudData.fileInfo.modifiedTime
+    };
   }
 
   /**
-   * Get count of items in export data
+   * Perform automatic sync based on data comparison
    */
-  getExportItemCount(data) {
-    const promptCount = data.customPrompts ? Object.keys(data.customPrompts).length : 0;
-    const variableCount = data.knowledgeBaseVariables ? Object.keys(data.knowledgeBaseVariables).length : 0;
+  async performAutoSync(localData, cloudData) {
+    // If no cloud data exists, upload local data
+    if (!cloudData) {
+      if (this.hasLocalData(localData)) {
+        return await this.uploadToGoogleDrive(localData);
+      } else {
+        return { success: true, action: 'no_action', reason: 'No data to sync' };
+      }
+    }
 
-    return promptCount + variableCount;
+    // If no local data exists, download cloud data
+    if (!this.hasLocalData(localData)) {
+      return await this.downloadFromGoogleDrive(cloudData);
+    }
+
+    // Compare timestamps to determine sync direction
+    const localTimestamp = localData.timestamp || 0;
+    const cloudTimestamp = cloudData.data.timestamp || 0;
+
+    if (localTimestamp > cloudTimestamp) {
+      // Local data is newer, upload to cloud
+      return await this.uploadToGoogleDrive(localData);
+    } else if (cloudTimestamp > localTimestamp) {
+      // Cloud data is newer, download to local
+      return await this.downloadFromGoogleDrive(cloudData);
+    } else {
+      // Data is in sync
+      return { success: true, action: 'in_sync', reason: 'Data is already synchronized' };
+    }
   }
 
   /**
-   * Download file to user's computer
+   * Check if local data has meaningful content
    */
-  async downloadFile(content, filename, mimeType) {
+  hasLocalData(localData) {
+    const hasPrompts = Object.keys(localData.customPrompts || {}).length > 0;
+    const hasVariables = Object.keys(localData.knowledgeBase || {}).length > 0;
+    return hasPrompts || hasVariables;
+  }
+
+  /**
+   * Set up authentication listeners for auto-sync
+   */
+  setupAuthListeners() {
     try {
-      const blob = new Blob([content], { type: mimeType });
-      const url = URL.createObjectURL(blob);
+      // Listen for Firebase authentication changes
+      if (window.firebaseAuth) {
+        window.firebaseAuth.addAuthListener((authState) => {
+          this.handleAuthStateChange(authState);
+        });
+      }
 
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.style.display = 'none';
+      // Also listen for Google authentication changes (fallback)
+      if (window.googleAuth) {
+        window.googleAuth.addAuthListener((authState) => {
+          this.handleAuthStateChange(authState);
+        });
+      }
 
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      URL.revokeObjectURL(url);
-
-      console.log('aiFiverr Backup: File downloaded:', filename);
+      console.log('aiFiverr BackupSync: Authentication listeners set up');
     } catch (error) {
-      console.error('aiFiverr Backup: File download failed:', error);
+      console.error('aiFiverr BackupSync: Failed to set up auth listeners:', error);
+    }
+  }
+
+  /**
+   * Handle authentication state changes
+   */
+  async handleAuthStateChange(authState) {
+    try {
+      if (authState.isAuthenticated) {
+        this.logActivity('auth', 'User signed in - triggering auto-sync');
+
+        // Wait a moment for other systems to initialize
+        setTimeout(async () => {
+          await this.performAutoSyncOnSignIn();
+        }, 2000);
+      } else {
+        this.logActivity('auth', 'User signed out');
+      }
+    } catch (error) {
+      console.error('aiFiverr BackupSync: Error handling auth state change:', error);
+      this.logActivity('error', `Auth state change error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Perform auto-sync when user signs in
+   */
+  async performAutoSyncOnSignIn() {
+    try {
+      if (!this.isInitialized) {
+        console.log('aiFiverr BackupSync: Not initialized, skipping auto-sync');
+        return;
+      }
+
+      this.logActivity('sync', 'Starting auto-sync on sign-in');
+
+      const localData = await this.prepareExportData();
+      const hasLocalData = this.hasLocalData(localData);
+
+      if (!hasLocalData) {
+        // New user or empty local data - try to restore from cloud
+        this.logActivity('sync', 'No local data found - attempting cloud restore');
+
+        try {
+          const result = await this.syncWithGoogleDrive('download');
+          if (result.success && result.action === 'downloaded') {
+            this.logActivity('sync', 'Successfully restored settings from cloud');
+          } else {
+            this.logActivity('sync', 'No cloud backup found for new user');
+          }
+        } catch (error) {
+          this.logActivity('warning', `Cloud restore failed: ${error.message}`);
+        }
+      } else {
+        // Existing user with local data - perform smart sync
+        this.logActivity('sync', 'Local data found - performing smart sync');
+
+        try {
+          const result = await this.syncWithGoogleDrive('auto');
+          if (result.success) {
+            this.logActivity('sync', `Auto-sync completed: ${result.action}`);
+          }
+        } catch (error) {
+          this.logActivity('warning', `Auto-sync failed: ${error.message}`);
+        }
+      }
+    } catch (error) {
+      console.error('aiFiverr BackupSync: Auto-sync on sign-in failed:', error);
+      this.logActivity('error', `Auto-sync failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get backup status information
+   */
+  async getBackupStatus() {
+    try {
+      const localData = await this.prepareExportData();
+      const isAuthenticated = this.googleDriveClient && await this.googleDriveClient.isAuthenticated();
+
+      let cloudStatus = {
+        connected: isAuthenticated,
+        lastBackup: null,
+        hasBackup: false
+      };
+
+      if (isAuthenticated) {
+        try {
+          const cloudData = await this.loadFromGoogleDrive();
+          if (cloudData) {
+            cloudStatus.hasBackup = true;
+            cloudStatus.lastBackup = cloudData.fileInfo.modifiedTime;
+          }
+        } catch (error) {
+          console.error('aiFiverr BackupSync: Failed to check cloud status:', error);
+        }
+      }
+
+      return {
+        local: {
+          totalPrompts: localData.metadata.totalPrompts,
+          totalVariables: localData.metadata.totalVariables,
+          lastModified: localData.timestamp
+        },
+        cloud: cloudStatus,
+        recentActivity: this.getActivityLog(5)
+      };
+    } catch (error) {
+      console.error('aiFiverr BackupSync: Failed to get backup status:', error);
       throw error;
     }
   }
 }
 
-// Initialize global backup sync manager
-window.initializeBackupSyncManager = function() {
-  if (!window.backupSyncManager) {
-    window.backupSyncManager = new BackupSyncManager();
-    console.log('aiFiverr: Backup Sync Manager created');
-  }
-  return window.backupSyncManager;
-};
-
-// Export for use in other modules
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = BackupSyncManager;
+// Initialize global instance
+if (typeof window !== 'undefined') {
+  window.backupSyncManager = new BackupSyncManager();
 }

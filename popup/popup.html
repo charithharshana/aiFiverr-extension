@@ -374,67 +374,83 @@
 
             <!-- Backup Tab -->
             <div class="kb-tab-content" id="backupTab">
-              <div class="kb-backup-header">
-                <p class="kb-backup-description">Export and import your custom prompts and variables. Sync with Google Drive for cross-browser compatibility.</p>
+              <div class="backup-header">
+                <p class="backup-description">Backup and sync your custom prompts and variables across devices using local files or Google Drive.</p>
               </div>
 
-              <!-- Sync Status -->
-              <div class="backup-sync-status" id="backupSyncStatus">
-                <div class="sync-status-item">
-                  <span class="sync-status-label">Local Data:</span>
-                  <span class="sync-status-value" id="localDataCount">Loading...</span>
-                </div>
-                <div class="sync-status-item">
-                  <span class="sync-status-label">Google Drive:</span>
-                  <span class="sync-status-value" id="driveConnectionStatus">Checking...</span>
-                </div>
-                <div class="sync-status-item">
-                  <span class="sync-status-label">Last Backup:</span>
-                  <span class="sync-status-value" id="lastBackupDate">Never</span>
-                </div>
-              </div>
-
-              <!-- Local Export/Import Section -->
-              <div class="backup-section">
-                <h4 class="backup-section-title">📁 Local Backup</h4>
-                <div class="backup-actions">
-                  <div class="backup-action-group">
-                    <label class="backup-label">Export Format:</label>
-                    <select id="exportFormat" class="backup-select">
-                      <option value="json">JSON (Editable)</option>
-                      <option value="markdown">Markdown (Readable)</option>
-                    </select>
-                  </div>
-                  <div class="backup-buttons">
-                    <button class="btn-secondary backup-btn" id="exportLocalBtn">📤 Export</button>
-                    <button class="btn-secondary backup-btn" id="importLocalBtn">📥 Import</button>
-                  </div>
-                </div>
-                <input type="file" id="importFileInput" accept=".json,.md" style="display: none;">
-              </div>
-
-              <!-- Google Drive Sync Section -->
-              <div class="backup-section">
-                <h4 class="backup-section-title">☁️ Google Drive Sync</h4>
-                <div class="backup-actions">
-                  <div class="backup-action-group">
-                    <div class="sync-info" id="syncInfo">
-                      <span class="sync-info-text">Automatically backup and restore your settings</span>
+              <!-- Backup Status -->
+              <div class="backup-status-section">
+                <h4>Backup Status</h4>
+                <div class="backup-status-grid">
+                  <div class="status-card">
+                    <div class="status-icon">💾</div>
+                    <div class="status-info">
+                      <div class="status-label">Local Data</div>
+                      <div class="status-value" id="localDataCount">Loading...</div>
+                      <div class="status-detail" id="localDataDetail">Prompts & Variables</div>
                     </div>
                   </div>
-                  <div class="backup-buttons">
-                    <button class="btn-primary backup-btn" id="syncToCloudBtn">☁️ Backup to Drive</button>
-                    <button class="btn-secondary backup-btn" id="restoreFromCloudBtn">📥 Restore from Drive</button>
+                  <div class="status-card">
+                    <div class="status-icon" id="cloudStatusIcon">☁️</div>
+                    <div class="status-info">
+                      <div class="status-label">Google Drive</div>
+                      <div class="status-value" id="cloudConnectionStatus">Checking...</div>
+                      <div class="status-detail" id="cloudBackupDetail">Last backup: Never</div>
+                    </div>
+                  </div>
+                  <div class="status-card">
+                    <div class="status-icon">🕒</div>
+                    <div class="status-info">
+                      <div class="status-label">Last Activity</div>
+                      <div class="status-value" id="lastActivityTime">None</div>
+                      <div class="status-detail" id="lastActivityDetail">No recent activity</div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <!-- Backup History -->
-              <div class="backup-section">
-                <h4 class="backup-section-title">📋 Recent Activity</h4>
-                <div class="backup-activity" id="backupActivity">
+              <!-- Backup Actions -->
+              <div class="backup-actions-section">
+                <h4>Backup Actions</h4>
+                <div class="backup-actions-grid">
+                  <!-- Local Export/Import -->
+                  <div class="backup-action-group">
+                    <h5>Local Backup</h5>
+                    <div class="backup-buttons">
+                      <div class="export-section">
+                        <label for="backupExportFormat">Export as:</label>
+                        <select id="backupExportFormat">
+                          <option value="json">JSON (.json)</option>
+                          <option value="markdown">Markdown (.md)</option>
+                        </select>
+                        <button class="btn-primary" id="exportBackup">📥 Export</button>
+                      </div>
+                      <div class="import-section">
+                        <input type="file" id="importBackupFile" accept=".json,.md" style="display: none;">
+                        <button class="btn-secondary" id="importBackup">📤 Import</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Google Drive Sync -->
+                  <div class="backup-action-group">
+                    <h5>Google Drive Sync</h5>
+                    <div class="backup-buttons">
+                      <button class="btn-primary" id="syncToCloud">☁️ Auto Sync</button>
+                      <button class="btn-secondary" id="uploadToCloud">⬆️ Upload</button>
+                      <button class="btn-secondary" id="downloadFromCloud">⬇️ Download</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Activity Log -->
+              <div class="backup-activity-section">
+                <h4>Recent Activity</h4>
+                <div class="activity-log" id="backupActivityLog">
                   <div class="activity-item">
-                    <span class="activity-text">No recent backup activity</span>
+                    <div class="activity-time">Loading...</div>
+                    <div class="activity-message">Initializing backup system...</div>
                   </div>
                 </div>
               </div>

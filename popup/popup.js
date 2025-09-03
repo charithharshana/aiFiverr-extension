@@ -123,27 +123,6 @@ class PopupManager {
       this.loadKnowledgeBaseFiles();
     });
 
-    // Backup tab event listeners
-    document.getElementById('exportLocalBtn')?.addEventListener('click', () => {
-      this.exportSettingsLocal();
-    });
-
-    document.getElementById('importLocalBtn')?.addEventListener('click', () => {
-      document.getElementById('importFileInput').click();
-    });
-
-    document.getElementById('importFileInput')?.addEventListener('change', (e) => {
-      this.importSettingsLocal(e.target.files[0]);
-    });
-
-    document.getElementById('syncToCloudBtn')?.addEventListener('click', () => {
-      this.syncSettingsToCloud();
-    });
-
-    document.getElementById('restoreFromCloudBtn')?.addEventListener('click', () => {
-      this.restoreSettingsFromCloud();
-    });
-
     document.getElementById('fileInput')?.addEventListener('change', (e) => {
       this.handleFileSelection(e.target.files);
     });
@@ -188,6 +167,31 @@ class PopupManager {
         this.handleFileSelection(e.dataTransfer.files);
       });
     }
+
+    // Backup tab event handlers
+    document.getElementById('exportBackup')?.addEventListener('click', () => {
+      this.exportBackup();
+    });
+
+    document.getElementById('importBackup')?.addEventListener('click', () => {
+      document.getElementById('importBackupFile').click();
+    });
+
+    document.getElementById('importBackupFile')?.addEventListener('change', (e) => {
+      this.handleBackupImport(e.target.files[0]);
+    });
+
+    document.getElementById('syncToCloud')?.addEventListener('click', () => {
+      this.syncBackupToCloud('auto');
+    });
+
+    document.getElementById('uploadToCloud')?.addEventListener('click', () => {
+      this.syncBackupToCloud('upload');
+    });
+
+    document.getElementById('downloadFromCloud')?.addEventListener('click', () => {
+      this.syncBackupToCloud('download');
+    });
 
     // File detail modal
     document.getElementById('closeKbFileModal')?.addEventListener('click', () => {
@@ -3681,7 +3685,7 @@ class PopupManager {
     if (tabName === 'files') {
       this.loadKnowledgeBaseFiles();
     } else if (tabName === 'backup') {
-      this.loadBackupTabData();
+      this.loadBackupStatus();
     }
   }
 
@@ -5403,6 +5407,327 @@ class PopupManager {
       }
     };
   }
+
+  // ===== BACKUP METHODS =====
+
+  /**
+   * Load and display backup status
+   */
+  async loadBackupStatus() {
+    try {
+      if (!window.backupSyncManager) {
+        this.showToast('Backup system not available', 'error');
+        return;
+      }
+
+      const status = await window.backupSyncManager.getBackupStatus();
+      this.updateBackupStatusUI(status);
+      this.updateBackupActivityLog(status.recentActivity);
+    } catch (error) {
+      console.error('Failed to load backup status:', error);
+      this.showToast('Failed to load backup status', 'error');
+    }
+  }
+
+  /**
+   * Update backup status UI elements
+   */
+  updateBackupStatusUI(status) {
+    // Update local data status
+    const localCount = status.local.totalPrompts + status.local.totalVariables;
+    document.getElementById('localDataCount').textContent = localCount.toString();
+    document.getElementById('localDataDetail').textContent =
+      `${status.local.totalPrompts} prompts, ${status.local.totalVariables} variables`;
+
+    // Update cloud status
+    const cloudIcon = document.getElementById('cloudStatusIcon');
+    const cloudStatus = document.getElementById('cloudConnectionStatus');
+    const cloudDetail = document.getElementById('cloudBackupDetail');
+
+    if (status.cloud.connected) {
+      cloudIcon.textContent = '☁️';
+      cloudStatus.textContent = 'Connected';
+      if (status.cloud.hasBackup && status.cloud.lastBackup) {
+        cloudDetail.textContent = `Last backup: ${new Date(status.cloud.lastBackup).toLocaleDateString()}`;
+      } else {
+        cloudDetail.textContent = 'No backup found';
+      }
+    } else {
+      cloudIcon.textContent = '⚠️';
+      cloudStatus.textContent = 'Not Connected';
+      cloudDetail.textContent = 'Sign in to Google Drive';
+    }
+
+    // Update last activity
+    if (status.recentActivity && status.recentActivity.length > 0) {
+      const lastActivity = status.recentActivity[0];
+      document.getElementById('lastActivityTime').textContent =
+        new Date(lastActivity.timestamp).toLocaleTimeString();
+      document.getElementById('lastActivityDetail').textContent = lastActivity.message;
+    }
+  }
+
+  /**
+   * Update activity log display
+   */
+  updateBackupActivityLog(activities) {
+    const logContainer = document.getElementById('backupActivityLog');
+
+    if (!activities || activities.length === 0) {
+      logContainer.innerHTML = `
+        <div class="activity-item">
+          <div class="activity-time">--:--</div>
+          <div class="activity-message">No recent activity</div>
+        </div>
+      `;
+      return;
+    }
+
+    logContainer.innerHTML = activities.map(activity => `
+      <div class="activity-item activity-${activity.type}">
+        <div class="activity-time">${new Date(activity.timestamp).toLocaleTimeString()}</div>
+        <div class="activity-message">${activity.message}</div>
+      </div>
+    `).join('');
+  }
+
+  /**
+   * Export backup to local file
+   */
+  async exportBackup() {
+    try {
+      if (!window.backupSyncManager) {
+        this.showToast('Backup system not available', 'error');
+        return;
+      }
+
+      const format = document.getElementById('backupExportFormat').value;
+      this.showLoading(true);
+
+      const exportData = await window.backupSyncManager.exportToLocal(format);
+      this.downloadFile(exportData);
+
+      this.showToast(`Backup exported as ${format.toUpperCase()}`, 'success');
+      await this.loadBackupStatus(); // Refresh status
+
+    } catch (error) {
+      console.error('Export backup failed:', error);
+      this.showToast(`Export failed: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  /**
+   * Handle backup file import
+   */
+  async handleBackupImport(file) {
+    if (!file) return;
+
+    try {
+      if (!window.backupSyncManager) {
+        this.showToast('Backup system not available', 'error');
+        return;
+      }
+
+      this.showLoading(true);
+
+      const fileContent = await this.readFileAsText(file);
+      const result = await window.backupSyncManager.importFromLocal(fileContent);
+
+      if (result.requiresUserDecision) {
+        // Show conflict resolution dialog
+        await this.showConflictResolutionDialog(result.conflicts, result.importData);
+      } else if (result.success) {
+        this.showToast(`Import successful: ${result.imported.customPrompts} prompts, ${result.imported.variables} variables`, 'success');
+        await this.loadBackupStatus(); // Refresh status
+        await this.loadKnowledgeBase(); // Refresh KB display
+      }
+
+    } catch (error) {
+      console.error('Import backup failed:', error);
+      this.showToast(`Import failed: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+      // Reset file input
+      document.getElementById('importBackupFile').value = '';
+    }
+  }
+
+  /**
+   * Sync backup with Google Drive
+   */
+  async syncBackupToCloud(direction = 'auto') {
+    try {
+      if (!window.backupSyncManager) {
+        this.showToast('Backup system not available', 'error');
+        return;
+      }
+
+      this.showLoading(true);
+
+      const result = await window.backupSyncManager.syncWithGoogleDrive(direction);
+
+      if (result.success) {
+        let message = '';
+        switch (result.action) {
+          case 'uploaded':
+            message = 'Settings backed up to Google Drive';
+            break;
+          case 'downloaded':
+            message = 'Settings restored from Google Drive';
+            break;
+          case 'in_sync':
+            message = 'Settings are already synchronized';
+            break;
+          default:
+            message = 'Sync completed successfully';
+        }
+        this.showToast(message, 'success');
+        await this.loadBackupStatus(); // Refresh status
+
+        if (result.action === 'downloaded') {
+          await this.loadKnowledgeBase(); // Refresh KB display if data was downloaded
+        }
+      }
+
+    } catch (error) {
+      console.error('Cloud sync failed:', error);
+      this.showToast(`Sync failed: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  /**
+   * Show conflict resolution dialog
+   */
+  async showConflictResolutionDialog(conflicts, importData) {
+    return new Promise((resolve) => {
+      const conflictCount = conflicts.length;
+      const message = `Found ${conflictCount} conflict${conflictCount > 1 ? 's' : ''} with existing data. How would you like to proceed?`;
+
+      const options = [
+        { text: 'Overwrite existing', value: 'overwrite' },
+        { text: 'Skip conflicts', value: 'skip' },
+        { text: 'Cancel import', value: 'cancel' }
+      ];
+
+      this.showConfirmDialog(
+        'Import Conflicts Detected',
+        message,
+        options,
+        async (choice) => {
+          if (choice === 'cancel') {
+            resolve();
+            return;
+          }
+
+          try {
+            this.showLoading(true);
+            const result = await window.backupSyncManager.importFromLocal(
+              JSON.stringify(importData),
+              { mergeStrategy: choice, forceOverwrite: true }
+            );
+
+            if (result.success) {
+              this.showToast(`Import completed: ${result.imported.customPrompts} prompts, ${result.imported.variables} variables`, 'success');
+              await this.loadBackupStatus();
+              await this.loadKnowledgeBase();
+            }
+          } catch (error) {
+            this.showToast(`Import failed: ${error.message}`, 'error');
+          } finally {
+            this.showLoading(false);
+          }
+          resolve();
+        }
+      );
+    });
+  }
+
+  /**
+   * Show confirmation dialog with multiple options
+   */
+  showConfirmDialog(title, message, options, callback) {
+    // Create modal overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    `;
+
+    // Create modal content
+    const modal = document.createElement('div');
+    modal.className = 'confirm-modal';
+    modal.style.cssText = `
+      background: white;
+      border-radius: 8px;
+      padding: 24px;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    `;
+
+    modal.innerHTML = `
+      <h3 style="margin: 0 0 16px 0; color: #2c3e50; font-size: 18px;">${title}</h3>
+      <p style="margin: 0 0 24px 0; color: #495057; line-height: 1.5;">${message}</p>
+      <div class="modal-buttons" style="display: flex; gap: 8px; justify-content: flex-end;">
+        ${options.map(option => `
+          <button class="modal-btn" data-value="${option.value}" style="
+            padding: 8px 16px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background: ${option.value === 'overwrite' ? '#1dbf73' : '#6c757d'};
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+          ">${option.text}</button>
+        `).join('')}
+      </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Add event listeners
+    modal.addEventListener('click', (e) => {
+      if (e.target.classList.contains('modal-btn')) {
+        const value = e.target.dataset.value;
+        document.body.removeChild(overlay);
+        callback(value);
+      }
+    });
+
+    // Close on overlay click
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        document.body.removeChild(overlay);
+        callback('cancel');
+      }
+    });
+  }
+
+  /**
+   * Read file as text
+   */
+  readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = (e) => reject(new Error('Failed to read file'));
+      reader.readAsText(file);
+    });
+  }
 }
 
 // Listen for messages from content script (only if chrome.runtime is available)
@@ -5432,344 +5757,6 @@ function initializeFallbackTabSwitching() {
       }
     });
   });
-
-  // ===== BACKUP AND SYNC METHODS =====
-
-  /**
-   * Initialize backup sync manager
-   */
-  async initializeBackupSyncManager() {
-    if (!window.backupSyncManager) {
-      // Load the backup sync manager script if not already loaded
-      if (!window.initializeBackupSyncManager) {
-        await this.loadScript('content/utils/backup-sync-manager.js');
-      }
-
-      if (window.initializeBackupSyncManager) {
-        window.backupSyncManager = window.initializeBackupSyncManager();
-        await window.backupSyncManager.initialize();
-      }
-    }
-    return window.backupSyncManager;
-  }
-
-  /**
-   * Load backup tab data
-   */
-  async loadBackupTabData() {
-    try {
-      const backupManager = await this.initializeBackupSyncManager();
-      if (!backupManager) {
-        console.error('Failed to initialize backup manager');
-        return;
-      }
-
-      // Get sync status
-      const status = await backupManager.getSyncStatus();
-
-      // Update UI elements
-      document.getElementById('localDataCount').textContent =
-        `${status.localDataCount} items`;
-
-      document.getElementById('driveConnectionStatus').textContent =
-        status.googleDriveConnected ? 'Connected' : 'Not Connected';
-
-      document.getElementById('lastBackupDate').textContent =
-        status.lastBackupDate ? new Date(status.lastBackupDate).toLocaleDateString() : 'Never';
-
-      // Update activity log
-      this.updateBackupActivity('Backup status refreshed');
-
-    } catch (error) {
-      console.error('Failed to load backup tab data:', error);
-      this.showToast('Failed to load backup status', 'error');
-    }
-  }
-
-  /**
-   * Export settings to local file
-   */
-  async exportSettingsLocal() {
-    try {
-      this.showLoading(true, 'Exporting settings...');
-
-      const backupManager = await this.initializeBackupSyncManager();
-      if (!backupManager) {
-        throw new Error('Backup manager not available');
-      }
-
-      const format = document.getElementById('exportFormat').value;
-      const result = await backupManager.exportToLocal(format);
-
-      if (result.success) {
-        this.showToast(`Settings exported successfully (${result.itemCount} items)`);
-        this.updateBackupActivity(`Exported ${result.itemCount} items to ${result.filename}`);
-      }
-
-    } catch (error) {
-      console.error('Export failed:', error);
-      this.showToast(`Export failed: ${error.message}`, 'error');
-    } finally {
-      this.showLoading(false);
-    }
-  }
-
-  /**
-   * Import settings from local file
-   */
-  async importSettingsLocal(file) {
-    if (!file) return;
-
-    try {
-      this.showLoading(true, 'Importing settings...');
-
-      const backupManager = await this.initializeBackupSyncManager();
-      if (!backupManager) {
-        throw new Error('Backup manager not available');
-      }
-
-      const fileContent = await this.readFileAsText(file);
-      const result = await backupManager.importFromLocal(fileContent);
-
-      if (result.success) {
-        const totalItems = result.results.customPrompts + result.results.knowledgeBaseVariables;
-        this.showToast(`Settings imported successfully (${totalItems} items)`);
-        this.updateBackupActivity(`Imported ${totalItems} items from ${file.name}`);
-
-        // Refresh the current tab data
-        await this.loadBackupTabData();
-
-        // Refresh other tabs if they're loaded
-        await this.loadKnowledgeBaseList();
-
-      } else if (result.requiresUserDecision) {
-        // Handle conflicts
-        await this.handleImportConflicts(result.conflicts, fileContent);
-      }
-
-    } catch (error) {
-      console.error('Import failed:', error);
-      this.showToast(`Import failed: ${error.message}`, 'error');
-    } finally {
-      this.showLoading(false);
-      // Clear the file input
-      document.getElementById('importFileInput').value = '';
-    }
-  }
-
-  /**
-   * Sync settings to Google Drive
-   */
-  async syncSettingsToCloud() {
-    try {
-      this.showLoading(true, 'Syncing to Google Drive...');
-
-      const backupManager = await this.initializeBackupSyncManager();
-      if (!backupManager) {
-        throw new Error('Backup manager not available');
-      }
-
-      const result = await backupManager.syncToGoogleDrive();
-
-      if (result.success) {
-        this.showToast('Settings synced to Google Drive successfully');
-        this.updateBackupActivity(`Synced to Google Drive: ${result.filename}`);
-
-        // Refresh backup status
-        await this.loadBackupTabData();
-      }
-
-    } catch (error) {
-      console.error('Sync to cloud failed:', error);
-      if (error.message.includes('authentication')) {
-        this.showToast('Please authenticate with Google Drive first', 'error');
-      } else {
-        this.showToast(`Sync failed: ${error.message}`, 'error');
-      }
-    } finally {
-      this.showLoading(false);
-    }
-  }
-
-  /**
-   * Restore settings from Google Drive
-   */
-  async restoreSettingsFromCloud() {
-    try {
-      this.showLoading(true, 'Restoring from Google Drive...');
-
-      const backupManager = await this.initializeBackupSyncManager();
-      if (!backupManager) {
-        throw new Error('Backup manager not available');
-      }
-
-      const result = await backupManager.restoreFromGoogleDrive();
-
-      if (result.success) {
-        const totalItems = result.results.customPrompts + result.results.knowledgeBaseVariables;
-        this.showToast(`Settings restored successfully (${totalItems} items)`);
-        this.updateBackupActivity(`Restored ${totalItems} items from Google Drive`);
-
-        // Refresh all relevant data
-        await this.loadBackupTabData();
-        await this.loadKnowledgeBaseList();
-
-      } else if (result.requiresUserDecision) {
-        // Handle conflicts
-        await this.handleRestoreConflicts(result.conflicts, result.backupInfo);
-      } else {
-        this.showToast(result.message || 'No backup found in Google Drive', 'warning');
-      }
-
-    } catch (error) {
-      console.error('Restore from cloud failed:', error);
-      if (error.message.includes('authentication')) {
-        this.showToast('Please authenticate with Google Drive first', 'error');
-      } else {
-        this.showToast(`Restore failed: ${error.message}`, 'error');
-      }
-    } finally {
-      this.showLoading(false);
-    }
-  }
-
-  /**
-   * Update backup activity log
-   */
-  updateBackupActivity(message) {
-    try {
-      const activityContainer = document.getElementById('backupActivity');
-      if (!activityContainer) return;
-
-      const timestamp = new Date().toLocaleString();
-      const activityItem = document.createElement('div');
-      activityItem.className = 'activity-item';
-      activityItem.innerHTML = `
-        <span class="activity-text">${timestamp}: ${message}</span>
-      `;
-
-      // Add to the top of the activity list
-      const firstChild = activityContainer.firstChild;
-      if (firstChild && firstChild.classList.contains('activity-item')) {
-        activityContainer.insertBefore(activityItem, firstChild);
-      } else {
-        // Replace the "No recent activity" message
-        activityContainer.innerHTML = '';
-        activityContainer.appendChild(activityItem);
-      }
-
-      // Keep only the last 5 activities
-      const activities = activityContainer.querySelectorAll('.activity-item');
-      if (activities.length > 5) {
-        for (let i = 5; i < activities.length; i++) {
-          activities[i].remove();
-        }
-      }
-
-    } catch (error) {
-      console.error('Failed to update backup activity:', error);
-    }
-  }
-
-  /**
-   * Handle import conflicts
-   */
-  async handleImportConflicts(conflicts, fileContent) {
-    // For now, show a simple confirmation dialog
-    // In a more sophisticated implementation, this could show a detailed conflict resolution UI
-    const conflictCount = conflicts.length;
-    const message = `Found ${conflictCount} conflict${conflictCount !== 1 ? 's' : ''} with existing data. Do you want to overwrite existing items?`;
-
-    if (confirm(message)) {
-      try {
-        this.showLoading(true, 'Resolving conflicts...');
-
-        const backupManager = await this.initializeBackupSyncManager();
-        const result = await backupManager.importFromLocal(fileContent, {
-          forceImport: true,
-          replaceExisting: true
-        });
-
-        if (result.success) {
-          const totalItems = result.results.customPrompts + result.results.knowledgeBaseVariables;
-          this.showToast(`Settings imported successfully (${totalItems} items, ${conflictCount} conflicts resolved)`);
-          this.updateBackupActivity(`Imported ${totalItems} items with ${conflictCount} conflicts resolved`);
-
-          // Refresh data
-          await this.loadBackupTabData();
-          await this.loadKnowledgeBaseList();
-        }
-
-      } catch (error) {
-        console.error('Conflict resolution failed:', error);
-        this.showToast(`Import failed: ${error.message}`, 'error');
-      } finally {
-        this.showLoading(false);
-      }
-    }
-  }
-
-  /**
-   * Handle restore conflicts
-   */
-  async handleRestoreConflicts(conflicts, backupInfo) {
-    const conflictCount = conflicts.length;
-    const backupDate = new Date(backupInfo.timestamp).toLocaleString();
-    const message = `Found ${conflictCount} conflict${conflictCount !== 1 ? 's' : ''} with backup from ${backupDate}. Do you want to overwrite existing data?`;
-
-    if (confirm(message)) {
-      try {
-        this.showLoading(true, 'Resolving conflicts...');
-
-        const backupManager = await this.initializeBackupSyncManager();
-        const result = await backupManager.restoreFromGoogleDrive({
-          forceRestore: true,
-          replaceExisting: true
-        });
-
-        if (result.success) {
-          const totalItems = result.results.customPrompts + result.results.knowledgeBaseVariables;
-          this.showToast(`Settings restored successfully (${totalItems} items, ${conflictCount} conflicts resolved)`);
-          this.updateBackupActivity(`Restored ${totalItems} items with ${conflictCount} conflicts resolved`);
-
-          // Refresh data
-          await this.loadBackupTabData();
-          await this.loadKnowledgeBaseList();
-        }
-
-      } catch (error) {
-        console.error('Restore conflict resolution failed:', error);
-        this.showToast(`Restore failed: ${error.message}`, 'error');
-      } finally {
-        this.showLoading(false);
-      }
-    }
-  }
-
-  /**
-   * Read file as text
-   */
-  readFileAsText(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target.result);
-      reader.onerror = (e) => reject(new Error('Failed to read file'));
-      reader.readAsText(file);
-    });
-  }
-
-  /**
-   * Load script dynamically
-   */
-  loadScript(src) {
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = chrome.runtime.getURL(src);
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }
 }
 
 // Initialize popup when DOM is loaded
