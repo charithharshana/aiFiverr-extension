@@ -3973,19 +3973,26 @@ class PopupManager {
       console.log('aiFiverr Popup: Starting custom prompts and variables sync...');
 
       // Sync custom prompts
+      console.log('aiFiverr Popup: Syncing custom prompts...');
       const promptsResult = await this.syncCustomPrompts();
+      console.log('aiFiverr Popup: Custom prompts sync result:', promptsResult);
 
       // Sync knowledge base variables
+      console.log('aiFiverr Popup: Syncing knowledge base variables...');
       const variablesResult = await this.syncKnowledgeBaseVariables();
+      console.log('aiFiverr Popup: Variables sync result:', variablesResult);
 
       const success = promptsResult.success && variablesResult.success;
 
-      return {
+      const result = {
         success: success,
         promptsResult: promptsResult,
         variablesResult: variablesResult,
         error: success ? null : 'Some sync operations failed'
       };
+
+      console.log('aiFiverr Popup: Combined sync result:', result);
+      return result;
 
     } catch (error) {
       console.error('aiFiverr Popup: Failed to sync custom prompts and variables:', error);
@@ -4001,36 +4008,49 @@ class PopupManager {
       console.log('aiFiverr Popup: Syncing custom prompts...');
 
       // Load from Google Drive via background script
+      console.log('aiFiverr Popup: Sending LOAD_CUSTOM_PROMPTS_FROM_DRIVE message...');
       const driveResult = await this.sendMessageToBackground({
         type: 'LOAD_CUSTOM_PROMPTS_FROM_DRIVE'
       });
+      console.log('aiFiverr Popup: Drive load result:', driveResult);
 
       if (driveResult.success && driveResult.data && Object.keys(driveResult.data).length > 0) {
         // Get current local prompts
+        console.log('aiFiverr Popup: Getting local custom prompts...');
         const localPrompts = await this.getStorageData('customPrompts') || {};
+        console.log('aiFiverr Popup: Local prompts:', localPrompts);
 
         // Merge with Drive data (local takes precedence for conflicts)
         const mergedPrompts = { ...driveResult.data, ...localPrompts };
+        console.log('aiFiverr Popup: Merged prompts:', mergedPrompts);
 
         // Save merged data back to local storage
+        console.log('aiFiverr Popup: Saving merged prompts to local storage...');
         await this.setStorageData({ customPrompts: mergedPrompts });
 
         // Save merged data back to Google Drive
-        await this.sendMessageToBackground({
+        console.log('aiFiverr Popup: Saving merged prompts to Google Drive...');
+        const saveResult = await this.sendMessageToBackground({
           type: 'SAVE_CUSTOM_PROMPTS_TO_DRIVE',
           data: mergedPrompts
         });
+        console.log('aiFiverr Popup: Save to Drive result:', saveResult);
 
         console.log('aiFiverr Popup: Custom prompts synced successfully');
         return { success: true };
       } else {
         // No data in Drive or error loading, save current local data to Drive
+        console.log('aiFiverr Popup: No data in Drive, backing up local prompts...');
         const localPrompts = await this.getStorageData('customPrompts') || {};
+        console.log('aiFiverr Popup: Local prompts to backup:', localPrompts);
+
         if (Object.keys(localPrompts).length > 0) {
-          await this.sendMessageToBackground({
+          console.log('aiFiverr Popup: Sending local prompts to Drive...');
+          const backupResult = await this.sendMessageToBackground({
             type: 'SAVE_CUSTOM_PROMPTS_TO_DRIVE',
             data: localPrompts
           });
+          console.log('aiFiverr Popup: Backup result:', backupResult);
         }
         console.log('aiFiverr Popup: Custom prompts backed up to Drive');
         return { success: true };
@@ -4049,9 +4069,11 @@ class PopupManager {
       console.log('aiFiverr Popup: Syncing knowledge base variables...');
 
       // Load from Google Drive via background script
+      console.log('aiFiverr Popup: Sending LOAD_VARIABLES_FROM_DRIVE message...');
       const driveResult = await this.sendMessageToBackground({
         type: 'LOAD_VARIABLES_FROM_DRIVE'
       });
+      console.log('aiFiverr Popup: Variables drive load result:', driveResult);
 
       if (driveResult.success && driveResult.data && Object.keys(driveResult.data).length > 0) {
         // Get current local variables

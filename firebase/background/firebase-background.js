@@ -2358,10 +2358,15 @@ async function handleLoadCustomPromptsFromDrive(sendResponse) {
   try {
     console.log('📥 Firebase Background: Loading custom prompts from Google Drive...');
 
-    // Ensure we have a valid token
-    const tokenValid = await ensureValidToken();
+    if (!authState.isAuthenticated || !authState.accessToken) {
+      sendResponse({ success: false, error: 'Authentication required to load custom prompts' });
+      return;
+    }
+
+    // Validate and refresh token if needed
+    const tokenValid = await validateAndRefreshToken();
     if (!tokenValid) {
-      sendResponse({ success: false, error: 'Authentication required' });
+      sendResponse({ success: false, error: 'Unable to obtain valid access token. Please sign out and sign in again.' });
       return;
     }
 
@@ -2424,10 +2429,15 @@ async function handleSaveCustomPromptsToDrive(message, sendResponse) {
   try {
     console.log('📤 Firebase Background: Saving custom prompts to Google Drive...');
 
-    // Ensure we have a valid token
-    const tokenValid = await ensureValidToken();
+    if (!authState.isAuthenticated || !authState.accessToken) {
+      sendResponse({ success: false, error: 'Authentication required to save custom prompts' });
+      return;
+    }
+
+    // Validate and refresh token if needed
+    const tokenValid = await validateAndRefreshToken();
     if (!tokenValid) {
-      sendResponse({ success: false, error: 'Authentication required' });
+      sendResponse({ success: false, error: 'Unable to obtain valid access token. Please sign out and sign in again.' });
       return;
     }
 
@@ -2511,10 +2521,15 @@ async function handleLoadVariablesFromDrive(sendResponse) {
   try {
     console.log('📥 Firebase Background: Loading variables from Google Drive...');
 
-    // Ensure we have a valid token
-    const tokenValid = await ensureValidToken();
+    if (!authState.isAuthenticated || !authState.accessToken) {
+      sendResponse({ success: false, error: 'Authentication required to load variables' });
+      return;
+    }
+
+    // Validate and refresh token if needed
+    const tokenValid = await validateAndRefreshToken();
     if (!tokenValid) {
-      sendResponse({ success: false, error: 'Authentication required' });
+      sendResponse({ success: false, error: 'Unable to obtain valid access token. Please sign out and sign in again.' });
       return;
     }
 
@@ -2577,10 +2592,15 @@ async function handleSaveVariablesToDrive(message, sendResponse) {
   try {
     console.log('📤 Firebase Background: Saving variables to Google Drive...');
 
-    // Ensure we have a valid token
-    const tokenValid = await ensureValidToken();
+    if (!authState.isAuthenticated || !authState.accessToken) {
+      sendResponse({ success: false, error: 'Authentication required to save variables' });
+      return;
+    }
+
+    // Validate and refresh token if needed
+    const tokenValid = await validateAndRefreshToken();
     if (!tokenValid) {
-      sendResponse({ success: false, error: 'Authentication required' });
+      sendResponse({ success: false, error: 'Unable to obtain valid access token. Please sign out and sign in again.' });
       return;
     }
 
