@@ -40,9 +40,14 @@ class PopupManager {
       // Don't automatically load files in background on fresh install
       // Only load if user has previously authenticated
       setTimeout(async () => {
-        const authStatus = await this.checkGoogleAuth();
-        if (authStatus.success) {
-          this.loadKnowledgeBaseFiles();
+        try {
+          const authStatus = await this.checkGoogleAuth();
+          if (authStatus.success) {
+            await this.loadKnowledgeBaseFiles();
+          }
+        } catch (error) {
+          // Silently handle background loading errors to prevent console spam
+          // Users will see appropriate messages when they actively try to access files
         }
       }, 1000);
     } catch (error) {
@@ -1099,7 +1104,7 @@ class PopupManager {
     if (countElement) {
       countElement.textContent = `${promptCount} prompt${promptCount !== 1 ? 's' : ''}`;
 
-      // Apply exact UI fix code as provided
+      // Apply exact UI fix code as provided for section header
       const $0 = countElement; // Reference element for the fix
       await this.setElementStyles($0.previousElementSibling, {
         overflow: 'hidden',
@@ -1110,7 +1115,7 @@ class PopupManager {
       const data = {
         applied: !!$0.previousElementSibling,
       };
-      console.log('Custom prompt title styling applied:', data);
+      console.log('Custom prompt section header styling applied:', data);
     }
 
     if (promptCount === 0) {
@@ -1156,6 +1161,19 @@ class PopupManager {
         </div>
       `;
     }).join('');
+
+    // Apply ellipsis styling to all prompt item names after rendering
+    setTimeout(async () => {
+      const promptNames = container.querySelectorAll('.prompt-item-name');
+      for (const nameElement of promptNames) {
+        await this.setElementStyles(nameElement, {
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+          textOverflow: 'ellipsis',
+          maxWidth: '200px' // Ensure there's a width constraint for ellipsis to work
+        });
+      }
+    }, 0);
   }
 
   getDefaultPrompts() {
@@ -3830,7 +3848,7 @@ class PopupManager {
 
     // Load data for the active tab
     if (tabName === 'files') {
-      this.loadKnowledgeBaseFiles();
+      this.loadKnowledgeBaseFilesWithAuthCheck();
     }
   }
 
@@ -4354,10 +4372,22 @@ class PopupManager {
       if (response && response.success) {
         return response.data || [];
       } else {
-        throw new Error(response?.error || 'Failed to get Drive files');
+        // Handle authentication errors more gracefully
+        const errorMsg = response?.error || 'Failed to get Drive files';
+        if (errorMsg.includes('Authentication required')) {
+          // Don't log authentication errors as errors - they're expected when not authenticated
+          console.log('aiFiverr Popup: Authentication required for Drive files access');
+          throw new Error('Authentication required to access knowledge base files');
+        } else {
+          console.error('aiFiverr Popup: Drive files error:', errorMsg);
+          throw new Error(errorMsg);
+        }
       }
     } catch (error) {
-      console.error('aiFiverr Popup: Error getting Drive files:', error);
+      // Only log non-authentication errors as errors
+      if (!error.message.includes('Authentication required')) {
+        console.error('aiFiverr Popup: Error getting Drive files:', error);
+      }
       throw error;
     }
   }

@@ -1324,6 +1324,8 @@ body {
 
 .prompt-item-title {
   flex: 1;
+  min-width: 0; /* Allow flex item to shrink below content size */
+  overflow: hidden; /* Ensure container can handle overflow */
 }
 
 .prompt-item-name {
@@ -1334,6 +1336,8 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 200px;
+  display: block;
 }
 
 .prompt-item-preview {
