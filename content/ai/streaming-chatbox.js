@@ -1163,11 +1163,24 @@ class StreamingChatbox {
     // Build complete conversation context
     const contents = [];
 
-    // Add conversation history
+    // Add conversation history (with file validation)
     for (const message of this.conversationHistory) {
+      // Filter out any stale file references from message parts
+      const cleanParts = message.parts.filter(part => {
+        if (part.fileData && part.fileData.fileUri) {
+          const fileId = part.fileData.fileUri.split('/').pop();
+          // Skip parts with suspicious or known stale file IDs
+          if (fileId === 'wrpdb7uq3ddk' || fileId === '46vm361k1btt' || fileId.length < 10) {
+            console.log('🚫 STREAMING CHATBOX: Filtering out stale file from conversation history:', fileId);
+            return false;
+          }
+        }
+        return true;
+      });
+
       contents.push({
         role: message.role === 'model' ? 'model' : 'user',
-        parts: message.parts
+        parts: cleanParts
       });
     }
 
@@ -1205,8 +1218,20 @@ class StreamingChatbox {
     // Validate files before adding them to the API call
     if (knowledgeBaseFiles.length > 0) {
       console.log('🔍 STREAMING CHATBOX: Validating files before API call...');
+      console.log('🔍 STREAMING CHATBOX: Files before validation:', knowledgeBaseFiles.map(f => ({
+        name: f.name,
+        geminiUri: f.geminiUri,
+        fileId: f.geminiUri ? f.geminiUri.split('/').pop() : 'no-uri'
+      })));
+
       knowledgeBaseFiles = await this.validateFilesBeforeAPICall(knowledgeBaseFiles);
+
       console.log('✅ STREAMING CHATBOX: File validation complete. Valid files:', knowledgeBaseFiles.length);
+      console.log('✅ STREAMING CHATBOX: Valid files:', knowledgeBaseFiles.map(f => ({
+        name: f.name,
+        geminiUri: f.geminiUri,
+        fileId: f.geminiUri ? f.geminiUri.split('/').pop() : 'no-uri'
+      })));
     }
 
     // Add files to the last user message if available
@@ -1235,6 +1260,24 @@ class StreamingChatbox {
         candidateCount: 1
       }
     };
+
+    // DEBUG: Log all file references in the payload
+    console.log('🔍 STREAMING CHATBOX: Debugging payload files...');
+    for (let i = 0; i < contents.length; i++) {
+      const message = contents[i];
+      if (message.parts) {
+        const fileRefs = message.parts.filter(part => part.fileData);
+        if (fileRefs.length > 0) {
+          console.log(`📄 Message ${i} (${message.role}): ${fileRefs.length} file references:`,
+            fileRefs.map(ref => ({
+              fileUri: ref.fileData.fileUri,
+              fileId: ref.fileData.fileUri.split('/').pop(),
+              mimeType: ref.fileData.mimeType
+            }))
+          );
+        }
+      }
+    }
 
     // Get model name
     let model = 'gemini-2.5-flash';
@@ -1278,7 +1321,9 @@ class StreamingChatbox {
         console.error('🔧 SOLUTION: Cleaning up stale file and retrying...');
 
         // Attempt to clean up the stale file reference
+        console.log('🧹 STREAMING CHATBOX: Starting cleanup for file:', fileId);
         const cleanupSuccess = await this.cleanupStaleFileReference(fileId);
+        console.log('🧹 STREAMING CHATBOX: Cleanup result:', cleanupSuccess);
 
         if (cleanupSuccess && retryCount < 3) {
           console.log(`🔄 STREAMING CHATBOX: Stale file cleaned up, retrying API call (attempt ${retryCount + 1}/3)...`);
@@ -1288,6 +1333,7 @@ class StreamingChatbox {
           const errorMsg = retryCount >= 3
             ? `Maximum retry attempts reached. Please refresh your knowledge base files and try again.`
             : `File access error. Some attached files may have expired. Please refresh your knowledge base files and try again.`;
+          console.error('🚨 STREAMING CHATBOX: Not retrying because:', { cleanupSuccess, retryCount, maxRetries: 3 });
           throw new Error(errorMsg);
         }
       }
