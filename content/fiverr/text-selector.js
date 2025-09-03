@@ -806,6 +806,7 @@ class TextSelector {
    */
   getManuallyAttachedFiles() {
     const attachedFiles = [];
+    const validFiles = []; // Declare validFiles at method scope to avoid ReferenceError
 
     try {
       // PRIORITY 1: Include files that were used in the last AI result (for streaming chat context)
@@ -835,7 +836,6 @@ class TextSelector {
       console.log('aiFiverr: Total files for streaming chat context (before validation):', attachedFiles.length);
 
       // CRITICAL: Validate all files to remove stale/expired ones before returning
-      const validFiles = [];
       for (const file of attachedFiles) {
         try {
           // Check if file has required properties
