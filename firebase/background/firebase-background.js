@@ -284,6 +284,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return true; // Async response
 
+    case 'SYNC_CUSTOM_PROMPTS':
+      console.log('📝 Firebase Background: Syncing custom prompts from Google Drive');
+      handleSyncCustomPrompts((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
+      return true; // Async response
+
+    case 'SYNC_KNOWLEDGE_BASE_VARIABLES':
+      console.log('🔧 Firebase Background: Syncing knowledge base variables from Google Drive');
+      handleSyncKnowledgeBaseVariables((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
+      return true; // Async response
+
+    case 'BACKUP_CUSTOM_PROMPTS':
+      console.log('💾 Firebase Background: Backing up custom prompts to Google Drive');
+      handleBackupCustomPrompts(message.data, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
+      return true; // Async response
+
+    case 'BACKUP_KNOWLEDGE_BASE_VARIABLES':
+      console.log('💾 Firebase Background: Backing up knowledge base variables to Google Drive');
+      handleBackupKnowledgeBaseVariables(message.data, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
+      return true; // Async response
+
     case 'UPLOAD_FILE_TO_GEMINI':
       console.log('📤 Firebase Background: Uploading file to Gemini');
       handleUploadFileToGemini(message, (response) => {
@@ -509,6 +541,124 @@ async function handleFirebaseSignOut(sendResponse) {
   }
 }
 
+// Handle backing up custom prompts to Google Drive
+async function handleBackupCustomPrompts(promptsData, sendResponse) {
+  try {
+    console.log('💾 Firebase Background: Backing up custom prompts to Google Drive...');
+
+    if (!authState.isAuthenticated || !authState.accessToken) {
+      throw new Error('Authentication required to backup custom prompts');
+    }
+
+    // Validate and refresh token if needed
+    const tokenValid = await validateAndRefreshToken();
+    if (!tokenValid) {
+      throw new Error('Unable to obtain valid access token. Please sign out and sign in again.');
+    }
+
+    // Get aiFiverr folder ID
+    const folderId = await ensureAiFiverrFolder();
+
+    // Create JSON content
+    const jsonContent = JSON.stringify(promptsData, null, 2);
+    const blob = new Blob([jsonContent], { type: 'application/json' });
+
+    // Create form data for multipart upload
+    const metadata = {
+      name: 'aifiverr-custom-prompts.json',
+      parents: [folderId],
+      description: 'aiFiverr custom prompts backup',
+      properties: {
+        aiFiverr_type: 'custom_prompts',
+        aiFiverr_version: '1.0'
+      }
+    };
+
+    const formData = new FormData();
+    formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    formData.append('file', blob);
+
+    const uploadResponse = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`
+      },
+      body: formData
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error(`Failed to backup custom prompts: ${uploadResponse.status} ${uploadResponse.statusText}`);
+    }
+
+    const result = await uploadResponse.json();
+    console.log('✅ Firebase Background: Custom prompts backed up successfully:', result.id);
+    sendResponse({ success: true, fileId: result.id });
+
+  } catch (error) {
+    console.error('❌ Firebase Background: Failed to backup custom prompts:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+// Handle backing up knowledge base variables to Google Drive
+async function handleBackupKnowledgeBaseVariables(variablesData, sendResponse) {
+  try {
+    console.log('💾 Firebase Background: Backing up knowledge base variables to Google Drive...');
+
+    if (!authState.isAuthenticated || !authState.accessToken) {
+      throw new Error('Authentication required to backup knowledge base variables');
+    }
+
+    // Validate and refresh token if needed
+    const tokenValid = await validateAndRefreshToken();
+    if (!tokenValid) {
+      throw new Error('Unable to obtain valid access token. Please sign out and sign in again.');
+    }
+
+    // Get aiFiverr folder ID
+    const folderId = await ensureAiFiverrFolder();
+
+    // Create JSON content
+    const jsonContent = JSON.stringify(variablesData, null, 2);
+    const blob = new Blob([jsonContent], { type: 'application/json' });
+
+    // Create form data for multipart upload
+    const metadata = {
+      name: 'aifiverr-knowledge-base-variables.json',
+      parents: [folderId],
+      description: 'aiFiverr knowledge base variables backup',
+      properties: {
+        aiFiverr_type: 'knowledge_base_variables',
+        aiFiverr_version: '1.0'
+      }
+    };
+
+    const formData = new FormData();
+    formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    formData.append('file', blob);
+
+    const uploadResponse = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`
+      },
+      body: formData
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error(`Failed to backup knowledge base variables: ${uploadResponse.status} ${uploadResponse.statusText}`);
+    }
+
+    const result = await uploadResponse.json();
+    console.log('✅ Firebase Background: Knowledge base variables backed up successfully:', result.id);
+    sendResponse({ success: true, fileId: result.id });
+
+  } catch (error) {
+    console.error('❌ Firebase Background: Failed to backup knowledge base variables:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
 // Handle storing user data
 async function handleStoreUserData(userData, sendResponse) {
   try {
@@ -573,6 +723,134 @@ async function handleValidateToken(sendResponse) {
 
   } catch (error) {
     console.error('❌ Firebase Background: Token validation error:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+// Handle syncing custom prompts from Google Drive
+async function handleSyncCustomPrompts(sendResponse) {
+  try {
+    console.log('📝 Firebase Background: Syncing custom prompts from Google Drive...');
+
+    if (!authState.isAuthenticated || !authState.accessToken) {
+      throw new Error('Authentication required to sync custom prompts');
+    }
+
+    // Validate and refresh token if needed
+    const tokenValid = await validateAndRefreshToken();
+    if (!tokenValid) {
+      throw new Error('Unable to obtain valid access token. Please sign out and sign in again.');
+    }
+
+    // Search for custom prompts backup file
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='aifiverr-custom-prompts.json' and trashed=false&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc`;
+
+    const response = await fetch(searchUrl, {
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to search for custom prompts: ${response.status} ${response.statusText}`);
+    }
+
+    const searchResult = await response.json();
+    const files = searchResult.files || [];
+
+    if (files.length === 0) {
+      console.log('📝 Firebase Background: No custom prompts backup found in Google Drive');
+      sendResponse({ success: true, data: null, message: 'No backup found' });
+      return;
+    }
+
+    // Get the most recent file
+    const latestFile = files[0];
+
+    // Download the file content
+    const downloadResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${latestFile.id}?alt=media`, {
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`
+      }
+    });
+
+    if (!downloadResponse.ok) {
+      throw new Error(`Failed to download custom prompts: ${downloadResponse.status} ${downloadResponse.statusText}`);
+    }
+
+    const fileContent = await downloadResponse.text();
+    const customPrompts = JSON.parse(fileContent);
+
+    console.log(`📝 Firebase Background: Successfully synced ${Object.keys(customPrompts).length} custom prompts from Google Drive`);
+    sendResponse({ success: true, data: customPrompts });
+
+  } catch (error) {
+    console.error('❌ Firebase Background: Failed to sync custom prompts:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+// Handle syncing knowledge base variables from Google Drive
+async function handleSyncKnowledgeBaseVariables(sendResponse) {
+  try {
+    console.log('🔧 Firebase Background: Syncing knowledge base variables from Google Drive...');
+
+    if (!authState.isAuthenticated || !authState.accessToken) {
+      throw new Error('Authentication required to sync knowledge base variables');
+    }
+
+    // Validate and refresh token if needed
+    const tokenValid = await validateAndRefreshToken();
+    if (!tokenValid) {
+      throw new Error('Unable to obtain valid access token. Please sign out and sign in again.');
+    }
+
+    // Search for variables backup file
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='aifiverr-knowledge-base-variables.json' and trashed=false&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc`;
+
+    const response = await fetch(searchUrl, {
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to search for knowledge base variables: ${response.status} ${response.statusText}`);
+    }
+
+    const searchResult = await response.json();
+    const files = searchResult.files || [];
+
+    if (files.length === 0) {
+      console.log('🔧 Firebase Background: No knowledge base variables backup found in Google Drive');
+      sendResponse({ success: true, data: null, message: 'No backup found' });
+      return;
+    }
+
+    // Get the most recent file
+    const latestFile = files[0];
+
+    // Download the file content
+    const downloadResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${latestFile.id}?alt=media`, {
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`
+      }
+    });
+
+    if (!downloadResponse.ok) {
+      throw new Error(`Failed to download knowledge base variables: ${downloadResponse.status} ${downloadResponse.statusText}`);
+    }
+
+    const fileContent = await downloadResponse.text();
+    const variables = JSON.parse(fileContent);
+
+    console.log(`🔧 Firebase Background: Successfully synced ${Object.keys(variables).length} knowledge base variables from Google Drive`);
+    sendResponse({ success: true, data: variables });
+
+  } catch (error) {
+    console.error('❌ Firebase Background: Failed to sync knowledge base variables:', error);
     sendResponse({ success: false, error: error.message });
   }
 }
