@@ -806,7 +806,6 @@ class TextSelector {
    */
   getManuallyAttachedFiles() {
     const attachedFiles = [];
-    const validFiles = []; // Declare validFiles at method scope to avoid ReferenceError
 
     try {
       // PRIORITY 1: Include files that were used in the last AI result (for streaming chat context)
@@ -833,58 +832,13 @@ class TextSelector {
         console.log('aiFiverr: Found universal chat attached files:', window.universalChat.attachedFiles.length, 'new files:', newFiles.length);
       }
 
-      console.log('aiFiverr: Total files for streaming chat context (before validation):', attachedFiles.length);
-
-      // CRITICAL: Validate all files to remove stale/expired ones before returning
-      for (const file of attachedFiles) {
-        try {
-          // Check if file has required properties
-          if (!file.geminiUri) {
-            console.warn('⚠️ aiFiverr: File missing geminiUri, skipping:', file.name);
-            continue;
-          }
-
-          // Check if file is expired using knowledge base manager if available
-          if (window.knowledgeBaseManager && typeof window.knowledgeBaseManager.isFileExpired === 'function') {
-            if (window.knowledgeBaseManager.isFileExpired(file)) {
-              console.warn('🗑️ aiFiverr: File expired, removing from manually attached files:', file.name, file.geminiUri);
-              continue;
-            }
-          }
-
-          // Basic URI format validation
-          if (!file.geminiUri.startsWith('https://generativelanguage.googleapis.com/v1beta/files/')) {
-            console.warn('⚠️ aiFiverr: Invalid geminiUri format, skipping:', file.name, file.geminiUri);
-            continue;
-          }
-
-          // Extract file ID for additional validation
-          const fileId = file.geminiUri.split('/').pop();
-          if (fileId.length < 10) {
-            console.warn('🚫 aiFiverr: File ID too short, skipping:', fileId, file.name);
-            continue;
-          }
-
-          // REMOVED: Hardcoded blacklist for specific file IDs
-          // The previous logic was filtering out 'wrpdb7uq3ddk' but this might be a legitimate file
-          // Instead, we rely on expiration checking above to filter truly expired files
-
-          validFiles.push(file);
-          console.log('✅ aiFiverr: File validated for manual attachment:', file.name);
-
-        } catch (error) {
-          console.warn('⚠️ aiFiverr: Error validating manually attached file:', file.name, error);
-        }
-      }
-
-      console.log('📊 aiFiverr: File validation complete for manually attached files:', validFiles.length, 'of', attachedFiles.length, 'files are valid');
+      console.log('aiFiverr: Total files for streaming chat context:', attachedFiles.length);
 
     } catch (error) {
       console.error('aiFiverr: Error getting manually attached files:', error);
-      return [];
     }
 
-    return validFiles;
+    return attachedFiles;
   }
 
   /**
@@ -2074,11 +2028,11 @@ class TextSelector {
 
     // Chat button - transition to streaming chatbox
     const continueBtn = popup.querySelector('.continue-chat-btn');
-    console.log('🔍 aiFiverr: Chat button found:', continueBtn);
+    console.log('aiFiverr: Chat button found:', continueBtn);
 
     if (continueBtn) {
       continueBtn.addEventListener('click', async (event) => {
-        console.log('🖱️ aiFiverr: Chat button clicked!', event);
+        console.log('aiFiverr: Chat button clicked!', event);
         event.preventDefault();
         event.stopPropagation();
 
@@ -2086,37 +2040,25 @@ class TextSelector {
         const currentText = isEditing ? textarea.value : (popup.dataset.currentText || result);
         const originalSelectedText = popup.dataset.originalText || originalText;
 
-        console.log('📝 aiFiverr: Chat clicked with data:', {
-          currentText: currentText?.substring(0, 100) + '...',
-          originalSelectedText: originalSelectedText?.substring(0, 100) + '...',
-          isEditing
-        });
+        console.log('aiFiverr: Chat clicked', { currentText, originalSelectedText });
 
       try {
         // Check if StreamingChatbox is available
         if (typeof window.StreamingChatbox === 'undefined') {
-          console.error('❌ aiFiverr: StreamingChatbox not available, keeping popup open');
+          console.error('aiFiverr: StreamingChatbox not available, keeping popup open');
           this.showToast('Streaming chat not available. Please try again.');
           return;
         }
 
-        console.log('✅ aiFiverr: StreamingChatbox available, proceeding with chat initialization');
-
         // Show streaming chatbox with conversation context (this will handle popup closing internally)
         const success = await this.showStreamingChatbox(currentText, originalSelectedText);
 
-        console.log('📊 aiFiverr: showStreamingChatbox result:', success);
-
         // Only close popup if chatbox opened successfully
         if (success) {
-          console.log('✅ aiFiverr: Closing result popup after successful chatbox opening');
           this.closeResultPopup(popup);
-        } else {
-          console.error('❌ aiFiverr: Failed to open streaming chatbox, keeping popup open');
-          this.showToast('Failed to open streaming chat. Please try again.');
         }
       } catch (error) {
-        console.error('❌ aiFiverr: Error opening streaming chatbox:', error);
+        console.error('aiFiverr: Error opening streaming chatbox:', error);
         this.showToast('Error opening chat. Please try again.');
       }
     });
@@ -3356,18 +3298,18 @@ class TextSelector {
    * @returns {Promise<boolean>} - Returns true if chatbox opened successfully, false otherwise
    */
   async showStreamingChatbox(initialResult, originalText) {
-    console.log('🚀 aiFiverr: Showing streaming chatbox with initial result', { initialResult, originalText });
+    console.log('aiFiverr: Showing streaming chatbox with initial result', { initialResult, originalText });
 
     try {
       // Create or get existing chatbox instance
       if (!this.streamingChatbox) {
         // Check if StreamingChatbox class is available
         if (typeof window.StreamingChatbox === 'undefined') {
-          console.error('❌ aiFiverr: StreamingChatbox class not available');
+          console.error('aiFiverr: StreamingChatbox class not available');
           return false;
         }
 
-        console.log('🔧 aiFiverr: Creating new StreamingChatbox instance');
+        console.log('aiFiverr: Creating new StreamingChatbox instance');
 
         this.streamingChatbox = new window.StreamingChatbox({
           maxWidth: '700px',
@@ -3377,17 +3319,6 @@ class TextSelector {
           enableDragging: true,
           enableResizing: true
         });
-
-        // Wait a moment for initialization to complete
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Verify chatbox element was created
-        if (!this.streamingChatbox.chatboxElement) {
-          console.error('❌ aiFiverr: StreamingChatbox element not created');
-          return false;
-        }
-
-        console.log('✅ aiFiverr: StreamingChatbox instance created successfully');
       }
 
       // NEW: Set original context for consistent variable usage
@@ -3400,7 +3331,7 @@ class TextSelector {
       }
 
       const manuallyAttachedFiles = this.getManuallyAttachedFiles();
-      this.streamingChatbox.setManuallyAttachedFiles(manuallyAttachedFiles);
+      await this.streamingChatbox.setManuallyAttachedFiles(manuallyAttachedFiles);
 
       // Clear any existing conversation history and UI messages
       this.streamingChatbox.conversationHistory = [];
@@ -3427,64 +3358,18 @@ class TextSelector {
       const userMessageParts = [{ text: userMessageForHistory }];
 
       // CRITICAL: Include the same files that were used in the original AI request
-      // BUT VALIDATE THEM FIRST to remove any stale/expired files
       if (this.lastKnowledgeBaseFiles && this.lastKnowledgeBaseFiles.length > 0) {
-        console.log('🔍 aiFiverr: Validating', this.lastKnowledgeBaseFiles.length, 'files before adding to conversation history');
-
-        // Validate files to remove stale/expired ones
-        const validFiles = [];
+        // Add files to the beginning of the parts array (same as streaming chat does)
         for (const file of this.lastKnowledgeBaseFiles) {
-          try {
-            // Check if file has required properties
-            if (!file.geminiUri) {
-              console.warn('⚠️ aiFiverr: File missing geminiUri, skipping:', file.name);
-              continue;
-            }
-
-            // Check if file is expired using knowledge base manager if available
-            if (window.knowledgeBaseManager && typeof window.knowledgeBaseManager.isFileExpired === 'function') {
-              if (window.knowledgeBaseManager.isFileExpired(file)) {
-                console.warn('🗑️ aiFiverr: File expired, removing from conversation history:', file.name, file.geminiUri);
-                continue;
+          if (file.geminiUri) {
+            userMessageParts.unshift({
+              fileData: {
+                fileUri: file.geminiUri,
+                mimeType: file.mimeType || 'text/plain'
               }
-            }
-
-            // Basic URI format validation
-            if (!file.geminiUri.startsWith('https://generativelanguage.googleapis.com/v1beta/files/')) {
-              console.warn('⚠️ aiFiverr: Invalid geminiUri format, skipping:', file.name, file.geminiUri);
-              continue;
-            }
-
-            // Extract file ID for additional validation
-            const fileId = file.geminiUri.split('/').pop();
-            if (fileId.length < 10) {
-              console.warn('🚫 aiFiverr: File ID too short, skipping:', fileId, file.name);
-              continue;
-            }
-
-            // REMOVED: Hardcoded blacklist for specific file IDs
-            // The previous logic was filtering out 'wrpdb7uq3ddk' but this might be a legitimate file
-            // Instead, we rely on expiration checking above to filter truly expired files
-
-            validFiles.push(file);
-            console.log('✅ aiFiverr: File validated for conversation history:', file.name);
-
-          } catch (error) {
-            console.warn('⚠️ aiFiverr: Error validating file for conversation history:', file.name, error);
+            });
+            console.log('aiFiverr: Added original file to conversation history:', file.name);
           }
-        }
-
-        console.log('📊 aiFiverr: File validation complete:', validFiles.length, 'of', this.lastKnowledgeBaseFiles.length, 'files are valid');
-
-        // Add only valid files to the beginning of the parts array
-        for (const file of validFiles) {
-          userMessageParts.unshift({
-            fileData: {
-              fileUri: file.geminiUri,
-              mimeType: file.mimeType || 'text/plain'
-            }
-          });
-          console.log('✅ aiFiverr: Added validated file to conversation history:', file.name);
         }
       }
 
@@ -3499,29 +3384,7 @@ class TextSelector {
       });
 
       // Show the chatbox first
-      console.log('👁️ aiFiverr: Showing streaming chatbox...');
       this.streamingChatbox.show();
-
-      // Verify chatbox is visible
-      if (!this.streamingChatbox.isVisible) {
-        console.error('❌ aiFiverr: Chatbox show() failed - not visible');
-        return false;
-      }
-
-      // Check if chatbox element is in DOM and visible
-      const chatboxInDOM = document.body.contains(this.streamingChatbox.chatboxElement);
-      const displayStyle = this.streamingChatbox.chatboxElement.style.display;
-
-      console.log('🔍 aiFiverr: Chatbox visibility check:', {
-        isVisible: this.streamingChatbox.isVisible,
-        inDOM: chatboxInDOM,
-        displayStyle: displayStyle
-      });
-
-      if (!chatboxInDOM) {
-        console.error('❌ aiFiverr: Chatbox element not found in DOM');
-        return false;
-      }
 
       // Add the initial messages to the UI (display the original text for user, AI result as-is)
       this.streamingChatbox.addMessage('user', originalText);
@@ -3530,7 +3393,7 @@ class TextSelector {
       // Hide the floating icon since we now have the chatbox
       this.hideFloatingIcon();
 
-      console.log('✅ aiFiverr: Streaming chatbox initialized successfully with conversation context:', this.streamingChatbox.conversationHistory);
+      console.log('aiFiverr: Streaming chatbox initialized with conversation context:', this.streamingChatbox.conversationHistory);
 
       return true; // Success
     } catch (error) {
