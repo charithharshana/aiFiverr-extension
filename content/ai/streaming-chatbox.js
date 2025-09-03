@@ -880,10 +880,14 @@ class StreamingChatbox {
 
         // Extract file ID for additional validation
         const fileId = file.geminiUri.split('/').pop();
-        if (fileId === 'wrpdb7uq3ddk' || fileId.length < 10) {
-          console.warn('🚫 STREAMING CHATBOX: Suspicious file ID detected, skipping:', fileId, file.name);
+        if (fileId.length < 10) {
+          console.warn('🚫 STREAMING CHATBOX: File ID too short, skipping:', fileId, file.name);
           continue;
         }
+
+        // REMOVED: Hardcoded blacklist for specific file IDs
+        // The previous logic was filtering out 'wrpdb7uq3ddk' but this might be a legitimate file
+        // Instead, we rely on expiration checking above to filter truly expired files
 
         // File passed all validations
         validFiles.push(file);
@@ -2124,12 +2128,16 @@ class StreamingChatbox {
 
         // Extract file ID for additional validation
         const fileId = file.geminiUri.split('/').pop();
-        if (fileId === 'wrpdb7uq3ddk' || fileId.length < 10) {
-          console.warn('🚫 STREAMING CHATBOX: Suspicious file ID detected, skipping:', fileId, file.name);
-          // Clean up this specific problematic file
+        if (fileId.length < 10) {
+          console.warn('🚫 STREAMING CHATBOX: File ID too short, skipping:', fileId, file.name);
+          // Clean up this problematic file
           await this.cleanupStaleFileReference(fileId);
           continue;
         }
+
+        // REMOVED: Hardcoded blacklist for specific file IDs
+        // The previous logic was filtering out 'wrpdb7uq3ddk' but this might be a legitimate file
+        // Instead, we rely on expiration checking above to filter truly expired files
 
         // File passed all validations
         validFiles.push(file);

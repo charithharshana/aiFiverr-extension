@@ -860,10 +860,14 @@ class TextSelector {
 
           // Extract file ID for additional validation
           const fileId = file.geminiUri.split('/').pop();
-          if (fileId === 'wrpdb7uq3ddk' || fileId.length < 10) {
-            console.warn('🚫 aiFiverr: Suspicious file ID detected, skipping:', fileId, file.name);
+          if (fileId.length < 10) {
+            console.warn('🚫 aiFiverr: File ID too short, skipping:', fileId, file.name);
             continue;
           }
+
+          // REMOVED: Hardcoded blacklist for specific file IDs
+          // The previous logic was filtering out 'wrpdb7uq3ddk' but this might be a legitimate file
+          // Instead, we rely on expiration checking above to filter truly expired files
 
           validFiles.push(file);
           console.log('✅ aiFiverr: File validated for manual attachment:', file.name);
@@ -3453,10 +3457,14 @@ class TextSelector {
 
             // Extract file ID for additional validation
             const fileId = file.geminiUri.split('/').pop();
-            if (fileId === 'wrpdb7uq3ddk' || fileId.length < 10) {
-              console.warn('🚫 aiFiverr: Suspicious file ID detected, skipping:', fileId, file.name);
+            if (fileId.length < 10) {
+              console.warn('🚫 aiFiverr: File ID too short, skipping:', fileId, file.name);
               continue;
             }
+
+            // REMOVED: Hardcoded blacklist for specific file IDs
+            // The previous logic was filtering out 'wrpdb7uq3ddk' but this might be a legitimate file
+            // Instead, we rely on expiration checking above to filter truly expired files
 
             validFiles.push(file);
             console.log('✅ aiFiverr: File validated for conversation history:', file.name);
