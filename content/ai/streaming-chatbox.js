@@ -1118,7 +1118,11 @@ class StreamingChatbox {
   /**
    * Stream response with full conversation context
    */
-  async streamWithFullContext() {
+  async streamWithFullContext(retryCount = 0) {
+    if (retryCount > 0) {
+      console.log(`🔄 STREAMING CHATBOX: Retry attempt ${retryCount}/3 for API call`);
+    }
+
     // NEW: Enhanced API key handling with rotation support
     let apiKey;
     let sessionId = 'streaming_chat'; // Consistent session ID for this chat
@@ -1271,12 +1275,21 @@ class StreamingChatbox {
 
         console.error('🚨 STREAMING CHATBOX: STALE FILE REFERENCE DETECTED:', fileId);
         console.error('💡 This file no longer exists or you don\'t have permission to access it');
-        console.error('🔧 SOLUTION: Remove this file from your knowledge base and upload a fresh copy');
+        console.error('🔧 SOLUTION: Cleaning up stale file and retrying...');
 
         // Attempt to clean up the stale file reference
-        await this.cleanupStaleFileReference(fileId);
+        const cleanupSuccess = await this.cleanupStaleFileReference(fileId);
 
-        throw new Error(`File access error. Some attached files may have expired. Please refresh your knowledge base files and try again.`);
+        if (cleanupSuccess && retryCount < 3) {
+          console.log(`🔄 STREAMING CHATBOX: Stale file cleaned up, retrying API call (attempt ${retryCount + 1}/3)...`);
+          // Retry the API call without the stale file
+          return await this.streamWithFullContext(retryCount + 1);
+        } else {
+          const errorMsg = retryCount >= 3
+            ? `Maximum retry attempts reached. Please refresh your knowledge base files and try again.`
+            : `File access error. Some attached files may have expired. Please refresh your knowledge base files and try again.`;
+          throw new Error(errorMsg);
+        }
       }
 
       console.error('aiFiverr StreamingChatbox: API request failed:', errorMessage);
