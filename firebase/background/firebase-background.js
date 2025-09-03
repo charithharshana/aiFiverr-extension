@@ -2466,42 +2466,56 @@ async function handleSaveCustomPromptsToDrive(message, sendResponse) {
 
     // Convert data to JSON
     const jsonData = JSON.stringify(customPrompts, null, 2);
-    const blob = new Blob([jsonData], { type: 'application/json' });
 
     let uploadResponse;
     if (existingFileId) {
-      // Update existing file
-      const formData = new FormData();
-      formData.append('file', blob);
-
+      // Update existing file using simple upload
+      console.log('📤 Firebase Background: Updating existing custom prompts file...');
       uploadResponse = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`, {
         method: 'PATCH',
         headers: {
-          'Authorization': `Bearer ${authState.accessToken}`
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': 'application/json'
         },
-        body: blob
+        body: jsonData
       });
     } else {
-      // Create new file
-      const formData = new FormData();
-      formData.append('metadata', JSON.stringify({
-        name: 'custom-prompts.json',
-        parents: [promptsFolderId],
-        description: 'aiFiverr custom prompts backup'
-      }));
-      formData.append('file', blob);
+      // Create new file using multipart upload (same format as working handleUploadFileToDrive)
+      console.log('📤 Firebase Background: Creating new custom prompts file...');
+
+      const boundary = '-------314159265358979323846';
+      const delimiter = `\r\n--${boundary}\r\n`;
+      const close_delim = `\r\n--${boundary}--`;
+
+      const metadata = {
+        'name': 'custom-prompts.json',
+        'parents': [promptsFolderId],
+        'description': 'aiFiverr custom prompts backup'
+      };
+
+      // Use the exact same format as the working file upload
+      const body = delimiter +
+        'Content-Type: application/json\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: application/json\r\n\r\n' +
+        jsonData +
+        close_delim;
 
       uploadResponse = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${authState.accessToken}`
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': `multipart/related; boundary="${boundary}"`
         },
-        body: formData
+        body: body
       });
     }
 
     if (!uploadResponse.ok) {
-      throw new Error(`Upload failed: ${uploadResponse.status}`);
+      const errorData = await uploadResponse.json().catch(() => ({}));
+      console.error('❌ Firebase Background: Custom prompts upload failed:', uploadResponse.status, errorData);
+      throw new Error(`Upload failed: ${uploadResponse.status} - ${errorData.error?.message || uploadResponse.statusText}`);
     }
 
     const uploadData = await uploadResponse.json();
@@ -2629,40 +2643,56 @@ async function handleSaveVariablesToDrive(message, sendResponse) {
 
     // Convert data to JSON
     const jsonData = JSON.stringify(variables, null, 2);
-    const blob = new Blob([jsonData], { type: 'application/json' });
 
     let uploadResponse;
     if (existingFileId) {
-      // Update existing file
+      // Update existing file using simple upload
+      console.log('📤 Firebase Background: Updating existing variables file...');
       uploadResponse = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${authState.accessToken}`,
           'Content-Type': 'application/json'
         },
-        body: blob
+        body: jsonData
       });
     } else {
-      // Create new file
-      const formData = new FormData();
-      formData.append('metadata', JSON.stringify({
-        name: 'knowledge-base-variables.json',
-        parents: [variablesFolderId],
-        description: 'aiFiverr knowledge base variables backup'
-      }));
-      formData.append('file', blob);
+      // Create new file using multipart upload (same format as working handleUploadFileToDrive)
+      console.log('📤 Firebase Background: Creating new variables file...');
+
+      const boundary = '-------314159265358979323847';
+      const delimiter = `\r\n--${boundary}\r\n`;
+      const close_delim = `\r\n--${boundary}--`;
+
+      const metadata = {
+        'name': 'knowledge-base-variables.json',
+        'parents': [variablesFolderId],
+        'description': 'aiFiverr knowledge base variables backup'
+      };
+
+      // Use the exact same format as the working file upload
+      const body = delimiter +
+        'Content-Type: application/json\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: application/json\r\n\r\n' +
+        jsonData +
+        close_delim;
 
       uploadResponse = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${authState.accessToken}`
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': `multipart/related; boundary="${boundary}"`
         },
-        body: formData
+        body: body
       });
     }
 
     if (!uploadResponse.ok) {
-      throw new Error(`Upload failed: ${uploadResponse.status}`);
+      const errorData = await uploadResponse.json().catch(() => ({}));
+      console.error('❌ Firebase Background: Variables upload failed:', uploadResponse.status, errorData);
+      throw new Error(`Upload failed: ${uploadResponse.status} - ${errorData.error?.message || uploadResponse.statusText}`);
     }
 
     const uploadData = await uploadResponse.json();

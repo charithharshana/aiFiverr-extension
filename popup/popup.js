@@ -2046,17 +2046,29 @@ class PopupManager {
           return;
         }
 
+        console.log('aiFiverr Popup: Sending message to background:', message.type);
+
+        // Set a timeout to prevent hanging
+        const timeout = setTimeout(() => {
+          console.warn('aiFiverr Popup: Background message timeout for:', message.type);
+          resolve({ success: false, error: 'Background script timeout' });
+        }, 30000); // 30 second timeout
+
         chrome.runtime.sendMessage(message, (response) => {
+          clearTimeout(timeout);
+
           if (chrome.runtime.lastError) {
             const errorMessage = chrome.runtime.lastError.message || 'Unknown runtime error';
-            console.warn('Runtime error:', errorMessage);
+            console.warn('aiFiverr Popup: Runtime error for', message.type, ':', errorMessage);
             resolve({ success: false, error: errorMessage });
             return;
           }
+
+          console.log('aiFiverr Popup: Received response for', message.type, ':', response);
           resolve(response || { success: false, error: 'No response from background script' });
         });
       } catch (error) {
-        console.error('Failed to send message to background:', error);
+        console.error('aiFiverr Popup: Failed to send message to background:', error);
         resolve({ success: false, error: error.message });
       }
     });
@@ -3944,16 +3956,20 @@ class PopupManager {
       await this.loadKnowledgeBaseFiles();
 
       // Sync custom prompts and variables directly in popup
+      console.log('aiFiverr Popup: Starting custom prompts and variables sync...');
       const syncResult = await this.syncCustomPromptsAndVariables();
+      console.log('aiFiverr Popup: Sync result received:', syncResult);
 
       if (syncResult && syncResult.success) {
         // Reload prompts and knowledge base to reflect synced data
+        console.log('aiFiverr Popup: Reloading UI data after successful sync...');
         await this.loadPrompts();
         await this.loadKnowledgeBase();
 
         this.showToast('All data synced successfully!', 'success');
       } else {
         console.warn('aiFiverr Popup: Custom prompts/variables sync had issues:', syncResult?.error);
+        console.warn('aiFiverr Popup: Full sync result:', syncResult);
         this.showToast('Data synced with some warnings. Check console for details.', 'warning');
       }
 
