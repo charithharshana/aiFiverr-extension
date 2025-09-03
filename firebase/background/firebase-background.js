@@ -384,6 +384,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       safeResponse({ success: true, counter: selectionCounter });
       return false; // Sync response
 
+    case 'LOAD_CUSTOM_PROMPTS_FROM_DRIVE':
+      console.log('📥 Firebase Background: Loading custom prompts from Drive');
+      handleLoadCustomPromptsFromDrive((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
+      return true; // Async response
+
+    case 'SAVE_CUSTOM_PROMPTS_TO_DRIVE':
+      console.log('📤 Firebase Background: Saving custom prompts to Drive');
+      handleSaveCustomPromptsToDrive(message, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
+      return true; // Async response
+
+    case 'LOAD_VARIABLES_FROM_DRIVE':
+      console.log('📥 Firebase Background: Loading variables from Drive');
+      handleLoadVariablesFromDrive((response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
+      return true; // Async response
+
+    case 'SAVE_VARIABLES_TO_DRIVE':
+      console.log('📤 Firebase Background: Saving variables to Drive');
+      handleSaveVariablesToDrive(message, (response) => {
+        clearResponseTimeout();
+        safeResponse(response);
+      });
+      return true; // Async response
+
     default:
       console.log('❓ Firebase Background: Unknown message type:', message.type);
       clearResponseTimeout();
@@ -2314,6 +2346,312 @@ async function validateAndRefreshToken() {
   } catch (error) {
     console.error('❌ Firebase Background: Token validation error:', error);
     return false;
+  }
+}
+
+// Custom Prompts and Variables Sync Handlers
+
+/**
+ * Load custom prompts from Google Drive
+ */
+async function handleLoadCustomPromptsFromDrive(sendResponse) {
+  try {
+    console.log('📥 Firebase Background: Loading custom prompts from Google Drive...');
+
+    // Ensure we have a valid token
+    const tokenValid = await ensureValidToken();
+    if (!tokenValid) {
+      sendResponse({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    // Get aiFiverr folder ID and ensure prompts subfolder exists
+    const folderId = await ensureAiFiverrFolder();
+    const promptsFolderId = await ensureSubfolder('prompts', folderId);
+
+    // Search for custom prompts file in prompts folder
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='custom-prompts.json' and parents in '${promptsFolderId}' and trashed=false&fields=files(id,name)`;
+
+    const searchResponse = await fetch(searchUrl, {
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!searchResponse.ok) {
+      throw new Error(`Search failed: ${searchResponse.status}`);
+    }
+
+    const searchData = await searchResponse.json();
+
+    if (!searchData.files || searchData.files.length === 0) {
+      console.log('📥 Firebase Background: No custom prompts file found in Google Drive');
+      sendResponse({ success: true, data: {} });
+      return;
+    }
+
+    // Download the file content
+    const fileId = searchData.files[0].id;
+    const downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+
+    const downloadResponse = await fetch(downloadUrl, {
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`
+      }
+    });
+
+    if (!downloadResponse.ok) {
+      throw new Error(`Download failed: ${downloadResponse.status}`);
+    }
+
+    const fileContent = await downloadResponse.text();
+    const customPrompts = JSON.parse(fileContent);
+
+    console.log('✅ Firebase Background: Custom prompts loaded from Google Drive');
+    sendResponse({ success: true, data: customPrompts });
+
+  } catch (error) {
+    console.error('❌ Firebase Background: Failed to load custom prompts from Drive:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Save custom prompts to Google Drive
+ */
+async function handleSaveCustomPromptsToDrive(message, sendResponse) {
+  try {
+    console.log('📤 Firebase Background: Saving custom prompts to Google Drive...');
+
+    // Ensure we have a valid token
+    const tokenValid = await ensureValidToken();
+    if (!tokenValid) {
+      sendResponse({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const customPrompts = message.data;
+    if (!customPrompts) {
+      sendResponse({ success: false, error: 'No custom prompts data provided' });
+      return;
+    }
+
+    // Get aiFiverr folder ID and ensure prompts subfolder exists
+    const folderId = await ensureAiFiverrFolder();
+    const promptsFolderId = await ensureSubfolder('prompts', folderId);
+
+    // Check if file already exists
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='custom-prompts.json' and parents in '${promptsFolderId}' and trashed=false&fields=files(id,name)`;
+
+    const searchResponse = await fetch(searchUrl, {
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    const searchData = await searchResponse.json();
+    const existingFileId = searchData.files && searchData.files.length > 0 ? searchData.files[0].id : null;
+
+    // Convert data to JSON
+    const jsonData = JSON.stringify(customPrompts, null, 2);
+    const blob = new Blob([jsonData], { type: 'application/json' });
+
+    let uploadResponse;
+    if (existingFileId) {
+      // Update existing file
+      const formData = new FormData();
+      formData.append('file', blob);
+
+      uploadResponse = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`
+        },
+        body: blob
+      });
+    } else {
+      // Create new file
+      const formData = new FormData();
+      formData.append('metadata', JSON.stringify({
+        name: 'custom-prompts.json',
+        parents: [promptsFolderId],
+        description: 'aiFiverr custom prompts backup'
+      }));
+      formData.append('file', blob);
+
+      uploadResponse = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`
+        },
+        body: formData
+      });
+    }
+
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed: ${uploadResponse.status}`);
+    }
+
+    const uploadData = await uploadResponse.json();
+    console.log('✅ Firebase Background: Custom prompts saved to Google Drive');
+    sendResponse({ success: true, fileId: uploadData.id });
+
+  } catch (error) {
+    console.error('❌ Firebase Background: Failed to save custom prompts to Drive:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Load knowledge base variables from Google Drive
+ */
+async function handleLoadVariablesFromDrive(sendResponse) {
+  try {
+    console.log('📥 Firebase Background: Loading variables from Google Drive...');
+
+    // Ensure we have a valid token
+    const tokenValid = await ensureValidToken();
+    if (!tokenValid) {
+      sendResponse({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    // Get aiFiverr folder ID and ensure variables subfolder exists
+    const folderId = await ensureAiFiverrFolder();
+    const variablesFolderId = await ensureSubfolder('variables', folderId);
+
+    // Search for variables file in variables folder
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='knowledge-base-variables.json' and parents in '${variablesFolderId}' and trashed=false&fields=files(id,name)`;
+
+    const searchResponse = await fetch(searchUrl, {
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!searchResponse.ok) {
+      throw new Error(`Search failed: ${searchResponse.status}`);
+    }
+
+    const searchData = await searchResponse.json();
+
+    if (!searchData.files || searchData.files.length === 0) {
+      console.log('📥 Firebase Background: No variables file found in Google Drive');
+      sendResponse({ success: true, data: {} });
+      return;
+    }
+
+    // Download the file content
+    const fileId = searchData.files[0].id;
+    const downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+
+    const downloadResponse = await fetch(downloadUrl, {
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`
+      }
+    });
+
+    if (!downloadResponse.ok) {
+      throw new Error(`Download failed: ${downloadResponse.status}`);
+    }
+
+    const fileContent = await downloadResponse.text();
+    const variables = JSON.parse(fileContent);
+
+    console.log('✅ Firebase Background: Variables loaded from Google Drive');
+    sendResponse({ success: true, data: variables });
+
+  } catch (error) {
+    console.error('❌ Firebase Background: Failed to load variables from Drive:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Save knowledge base variables to Google Drive
+ */
+async function handleSaveVariablesToDrive(message, sendResponse) {
+  try {
+    console.log('📤 Firebase Background: Saving variables to Google Drive...');
+
+    // Ensure we have a valid token
+    const tokenValid = await ensureValidToken();
+    if (!tokenValid) {
+      sendResponse({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const variables = message.data;
+    if (!variables) {
+      sendResponse({ success: false, error: 'No variables data provided' });
+      return;
+    }
+
+    // Get aiFiverr folder ID and ensure variables subfolder exists
+    const folderId = await ensureAiFiverrFolder();
+    const variablesFolderId = await ensureSubfolder('variables', folderId);
+
+    // Check if file already exists
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='knowledge-base-variables.json' and parents in '${variablesFolderId}' and trashed=false&fields=files(id,name)`;
+
+    const searchResponse = await fetch(searchUrl, {
+      headers: {
+        'Authorization': `Bearer ${authState.accessToken}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    const searchData = await searchResponse.json();
+    const existingFileId = searchData.files && searchData.files.length > 0 ? searchData.files[0].id : null;
+
+    // Convert data to JSON
+    const jsonData = JSON.stringify(variables, null, 2);
+    const blob = new Blob([jsonData], { type: 'application/json' });
+
+    let uploadResponse;
+    if (existingFileId) {
+      // Update existing file
+      uploadResponse = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: blob
+      });
+    } else {
+      // Create new file
+      const formData = new FormData();
+      formData.append('metadata', JSON.stringify({
+        name: 'knowledge-base-variables.json',
+        parents: [variablesFolderId],
+        description: 'aiFiverr knowledge base variables backup'
+      }));
+      formData.append('file', blob);
+
+      uploadResponse = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${authState.accessToken}`
+        },
+        body: formData
+      });
+    }
+
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed: ${uploadResponse.status}`);
+    }
+
+    const uploadData = await uploadResponse.json();
+    console.log('✅ Firebase Background: Variables saved to Google Drive');
+    sendResponse({ success: true, fileId: uploadData.id });
+
+  } catch (error) {
+    console.error('❌ Firebase Background: Failed to save variables to Drive:', error);
+    sendResponse({ success: false, error: error.message });
   }
 }
 

@@ -3943,10 +3943,8 @@ class PopupManager {
       // Sync knowledge base files
       await this.loadKnowledgeBaseFiles();
 
-      // Sync custom prompts and variables through content script
-      const syncResult = await this.sendMessageToTab({
-        type: 'SYNC_CUSTOM_PROMPTS_AND_VARIABLES'
-      });
+      // Sync custom prompts and variables directly in popup
+      const syncResult = await this.syncCustomPromptsAndVariables();
 
       if (syncResult && syncResult.success) {
         // Reload prompts and knowledge base to reflect synced data
@@ -3964,6 +3962,130 @@ class PopupManager {
       this.showToast('Failed to sync data. Please try again.', 'error');
     } finally {
       this.showLoading(false);
+    }
+  }
+
+  /**
+   * Sync custom prompts and variables with Google Drive
+   */
+  async syncCustomPromptsAndVariables() {
+    try {
+      console.log('aiFiverr Popup: Starting custom prompts and variables sync...');
+
+      // Sync custom prompts
+      const promptsResult = await this.syncCustomPrompts();
+
+      // Sync knowledge base variables
+      const variablesResult = await this.syncKnowledgeBaseVariables();
+
+      const success = promptsResult.success && variablesResult.success;
+
+      return {
+        success: success,
+        promptsResult: promptsResult,
+        variablesResult: variablesResult,
+        error: success ? null : 'Some sync operations failed'
+      };
+
+    } catch (error) {
+      console.error('aiFiverr Popup: Failed to sync custom prompts and variables:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Sync custom prompts with Google Drive
+   */
+  async syncCustomPrompts() {
+    try {
+      console.log('aiFiverr Popup: Syncing custom prompts...');
+
+      // Load from Google Drive via background script
+      const driveResult = await this.sendMessageToBackground({
+        type: 'LOAD_CUSTOM_PROMPTS_FROM_DRIVE'
+      });
+
+      if (driveResult.success && driveResult.data && Object.keys(driveResult.data).length > 0) {
+        // Get current local prompts
+        const localPrompts = await this.getStorageData('customPrompts') || {};
+
+        // Merge with Drive data (local takes precedence for conflicts)
+        const mergedPrompts = { ...driveResult.data, ...localPrompts };
+
+        // Save merged data back to local storage
+        await this.setStorageData({ customPrompts: mergedPrompts });
+
+        // Save merged data back to Google Drive
+        await this.sendMessageToBackground({
+          type: 'SAVE_CUSTOM_PROMPTS_TO_DRIVE',
+          data: mergedPrompts
+        });
+
+        console.log('aiFiverr Popup: Custom prompts synced successfully');
+        return { success: true };
+      } else {
+        // No data in Drive or error loading, save current local data to Drive
+        const localPrompts = await this.getStorageData('customPrompts') || {};
+        if (Object.keys(localPrompts).length > 0) {
+          await this.sendMessageToBackground({
+            type: 'SAVE_CUSTOM_PROMPTS_TO_DRIVE',
+            data: localPrompts
+          });
+        }
+        console.log('aiFiverr Popup: Custom prompts backed up to Drive');
+        return { success: true };
+      }
+    } catch (error) {
+      console.error('aiFiverr Popup: Failed to sync custom prompts:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Sync knowledge base variables with Google Drive
+   */
+  async syncKnowledgeBaseVariables() {
+    try {
+      console.log('aiFiverr Popup: Syncing knowledge base variables...');
+
+      // Load from Google Drive via background script
+      const driveResult = await this.sendMessageToBackground({
+        type: 'LOAD_VARIABLES_FROM_DRIVE'
+      });
+
+      if (driveResult.success && driveResult.data && Object.keys(driveResult.data).length > 0) {
+        // Get current local variables
+        const localVariables = await this.getStorageData('knowledgeBase') || {};
+
+        // Merge with Drive data (local takes precedence for conflicts)
+        const mergedVariables = { ...driveResult.data, ...localVariables };
+
+        // Save merged data back to local storage
+        await this.setStorageData({ knowledgeBase: mergedVariables });
+
+        // Save merged data back to Google Drive
+        await this.sendMessageToBackground({
+          type: 'SAVE_VARIABLES_TO_DRIVE',
+          data: mergedVariables
+        });
+
+        console.log('aiFiverr Popup: Knowledge base variables synced successfully');
+        return { success: true };
+      } else {
+        // No data in Drive or error loading, save current local data to Drive
+        const localVariables = await this.getStorageData('knowledgeBase') || {};
+        if (Object.keys(localVariables).length > 0) {
+          await this.sendMessageToBackground({
+            type: 'SAVE_VARIABLES_TO_DRIVE',
+            data: localVariables
+          });
+        }
+        console.log('aiFiverr Popup: Knowledge base variables backed up to Drive');
+        return { success: true };
+      }
+    } catch (error) {
+      console.error('aiFiverr Popup: Failed to sync knowledge base variables:', error);
+      return { success: false, error: error.message };
     }
   }
 
