@@ -92,17 +92,80 @@ class KnowledgeBaseManager {
   syncWithGeminiFilesInBackground() {
     setTimeout(async () => {
       try {
-        await this.syncWithGeminiFiles();
-        // Also sync custom prompts and variables in background
-        await this.syncCustomPromptsAndVariables();
+        // Set a reasonable timeout for background sync to prevent hanging
+        const syncPromise = Promise.race([
+          this.performBackgroundSync(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Background sync timeout after 45 seconds')), 45000)
+          )
+        ]);
+
+        await syncPromise;
+
         // Only log if debugging is enabled
         if (window.aiFiverrDebug) {
           console.log('aiFiverr KB: Background sync with Gemini Files and custom data completed');
         }
       } catch (error) {
-        console.warn('aiFiverr KB: Background sync failed:', error);
+        console.warn('aiFiverr KB: Background sync failed:', error.message);
+        // Don't throw - this is background sync and shouldn't break the UI
       }
     }, 2000); // Wait 2 seconds after initialization
+  }
+
+  /**
+   * Perform background sync operations with optimization
+   */
+  async performBackgroundSync() {
+    try {
+      // Check if sync is needed (avoid unnecessary syncs)
+      const lastSyncTime = await this.getLastSyncTime();
+      const now = Date.now();
+      const syncInterval = 5 * 60 * 1000; // 5 minutes
+
+      if (lastSyncTime && (now - lastSyncTime) < syncInterval) {
+        if (window.aiFiverrDebug) {
+          console.log('aiFiverr KB: Skipping background sync - too recent');
+        }
+        return;
+      }
+
+      // Sync with Gemini Files first (most likely to timeout)
+      await this.syncWithGeminiFiles();
+
+      // Then sync custom prompts and variables
+      await this.syncCustomPromptsAndVariables();
+
+      // Update last sync time
+      await this.setLastSyncTime(now);
+
+    } catch (error) {
+      console.warn('aiFiverr KB: Error during background sync:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get last sync timestamp
+   */
+  async getLastSyncTime() {
+    try {
+      const result = await window.storageManager?.get('lastKnowledgeBaseSync');
+      return result?.lastKnowledgeBaseSync || 0;
+    } catch (error) {
+      return 0;
+    }
+  }
+
+  /**
+   * Set last sync timestamp
+   */
+  async setLastSyncTime(timestamp) {
+    try {
+      await window.storageManager?.set({ lastKnowledgeBaseSync: timestamp });
+    } catch (error) {
+      console.warn('aiFiverr KB: Failed to save last sync time:', error);
+    }
   }
 
   /**
@@ -613,8 +676,54 @@ class KnowledgeBaseManager {
 
       const filesObject = Object.fromEntries(this.files);
       await window.storageManager.set({ knowledgeBaseFiles: filesObject });
+
+      // Also backup to Google Drive in background (don't wait for it)
+      this.backupKnowledgeBaseFilesToGoogleDrive().catch(error => {
+        // Silent fail for backup - don't block the main save operation
+        if (window.aiFiverrDebug) {
+          console.warn('aiFiverr KB: Background backup failed:', error);
+        }
+      });
+
     } catch (error) {
       console.error('Failed to save knowledge base files:', error);
+    }
+  }
+
+  /**
+   * Alias for saveKnowledgeBaseFiles for compatibility
+   */
+  async saveFiles() {
+    return await this.saveKnowledgeBaseFiles();
+  }
+
+  /**
+   * Backup knowledge base files to Google Drive including geminiUri data
+   */
+  async backupKnowledgeBaseFilesToGoogleDrive() {
+    try {
+      if (!this.isUserAuthenticated()) {
+        return;
+      }
+
+      // Get all file references with geminiUri data
+      const filesData = Object.fromEntries(this.files);
+
+      // Create backup data with comprehensive file information
+      const backupData = {
+        type: 'knowledge-base-files',
+        timestamp: new Date().toISOString(),
+        version: '1.0',
+        files: filesData,
+        fileCount: Object.keys(filesData).length,
+        filesWithGeminiUri: Object.values(filesData).filter(f => f.geminiUri).length
+      };
+
+      await this.syncDataToGoogleDrive('knowledge-base-files', backupData);
+      console.log('aiFiverr KB: Knowledge base files backed up to Google Drive with geminiUri data');
+
+    } catch (error) {
+      console.warn('aiFiverr KB: Failed to backup knowledge base files to Google Drive:', error);
     }
   }
 
@@ -1434,10 +1543,11 @@ class KnowledgeBaseManager {
         console.log(`aiFiverr KB: Sending message (attempt ${attempt}/${maxRetries}):`, message.type);
 
         const response = await new Promise((resolve, reject) => {
-          // Add timeout to prevent hanging
+          // Add timeout to prevent hanging - longer timeout for knowledge base operations
+          const timeoutDuration = message.type === 'GET_KNOWLEDGE_BASE_FILES' ? 45000 : 15000;
           const timeout = setTimeout(() => {
-            reject(new Error('Message timeout - no response received'));
-          }, 15000); // 15 second timeout for file uploads
+            reject(new Error(`Message timeout after ${timeoutDuration / 1000} seconds - no response received`));
+          }, timeoutDuration);
 
           chrome.runtime.sendMessage(message, (response) => {
             clearTimeout(timeout);

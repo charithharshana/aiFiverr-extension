@@ -3361,6 +3361,11 @@ class PopupManager {
 
       if (response && response.success) {
         this.showToast('Successfully signed out', 'success');
+
+        // Add a small delay to ensure background script has fully processed the logout
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Check auth status to update UI
         await this.checkAuthStatus();
       } else {
         throw new Error(response?.error || 'Sign out failed');
@@ -3369,6 +3374,10 @@ class PopupManager {
     } catch (error) {
       console.error('aiFiverr: Sign out failed:', error);
       this.showToast(`Sign out failed: ${error.message}`, 'error');
+
+      // Even if logout failed, try to update UI to reflect current state
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await this.checkAuthStatus();
     } finally {
       this.showLoading(false);
     }

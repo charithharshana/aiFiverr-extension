@@ -195,12 +195,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   };
 
   // Set a timeout to ensure response is sent even if handler fails
+  // Use longer timeout for file operations that may take time
+  const timeoutDuration = message.type === 'GET_KNOWLEDGE_BASE_FILES' || message.type === 'GET_DRIVE_FILES' ? 60000 : 30000;
   const responseTimeout = setTimeout(() => {
     if (!responseHandled) {
-      console.warn('Firebase Background: Handler timeout for message:', message.type);
-      safeResponse({ success: false, error: 'Handler timeout' });
+      console.warn('Firebase Background: Handler timeout for message:', message.type, 'after', timeoutDuration / 1000, 'seconds');
+      safeResponse({ success: false, error: `Handler timeout after ${timeoutDuration / 1000} seconds` });
     }
-  }, 30000); // 30 second timeout
+  }, timeoutDuration);
 
   const clearResponseTimeout = () => {
     if (responseTimeout) {
@@ -663,10 +665,16 @@ async function handleGetKnowledgeBaseFiles(sendResponse) {
 
     console.log(`📁 Firebase Background: Found ${driveFiles.length} Google Drive files`);
 
-    // Get Gemini files to merge with Drive files
+    // Get Gemini files to merge with Drive files (with caching and timeout protection)
     console.log('🔍 Firebase Background: Getting Gemini files for merging...');
-    const geminiFiles = await getGeminiFiles();
-    console.log(`🔍 Firebase Background: Found ${geminiFiles.length} Gemini files`);
+    let geminiFiles = [];
+    try {
+      geminiFiles = await getGeminiFilesWithCache();
+      console.log(`🔍 Firebase Background: Found ${geminiFiles.length} Gemini files`);
+    } catch (error) {
+      console.warn('🔍 Firebase Background: Failed to get Gemini files, continuing with Drive files only:', error.message);
+      // Continue with empty Gemini files array - this allows Drive files to still be returned
+    }
 
     // Create map of Gemini files by display name for efficient lookup
     const geminiFileMap = new Map();
@@ -705,6 +713,13 @@ async function handleGetKnowledgeBaseFiles(sendResponse) {
         geminiUri: geminiFile?.uri,
         geminiState: geminiFile?.state,
         geminiMimeType: geminiFile?.mimeType,
+        geminiCreateTime: geminiFile?.createTime,
+        geminiUpdateTime: geminiFile?.updateTime,
+        // Calculate expiration info for Gemini files (48 hours from creation)
+        geminiExpirationTime: geminiFile?.createTime ?
+          new Date(new Date(geminiFile.createTime).getTime() + (48 * 60 * 60 * 1000)).toISOString() : null,
+        isGeminiExpired: geminiFile?.createTime ?
+          (Date.now() - new Date(geminiFile.createTime).getTime()) > (48 * 60 * 60 * 1000) : false,
         driveFileId: driveFile.id
       };
 
@@ -1891,7 +1906,40 @@ async function getGeminiApiKey() {
   }
 }
 
-// Get list of files from Gemini API
+// Cache for Gemini files to reduce API calls
+let geminiFilesCache = {
+  data: null,
+  timestamp: 0,
+  ttl: 30000 // 30 seconds cache
+};
+
+// Clear Gemini files cache
+function clearGeminiFilesCache() {
+  geminiFilesCache.data = null;
+  geminiFilesCache.timestamp = 0;
+}
+
+// Get list of files from Gemini API with caching
+async function getGeminiFilesWithCache() {
+  const now = Date.now();
+
+  // Return cached data if still valid
+  if (geminiFilesCache.data && (now - geminiFilesCache.timestamp) < geminiFilesCache.ttl) {
+    console.log('🔍 Firebase Background: Using cached Gemini files');
+    return geminiFilesCache.data;
+  }
+
+  // Fetch fresh data
+  const files = await getGeminiFiles();
+
+  // Update cache
+  geminiFilesCache.data = files;
+  geminiFilesCache.timestamp = now;
+
+  return files;
+}
+
+// Get list of files from Gemini API with timeout and error handling
 async function getGeminiFiles() {
   try {
     console.log('🔍 Firebase Background: Getting files from Gemini API...');
@@ -1902,25 +1950,44 @@ async function getGeminiFiles() {
       return [];
     }
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/files?key=${apiKey}`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json'
+    // Add timeout to prevent hanging
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 15000); // 15 second timeout for Gemini API call
+
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/files?key=${apiKey}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('❌ Firebase Background: Gemini files list error:', response.status, errorData);
+        return [];
       }
-    });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error('❌ Firebase Background: Gemini files list error:', response.status, errorData);
-      return [];
+      const data = await response.json();
+      const files = data.files || [];
+
+      console.log(`🔍 Firebase Background: Found ${files.length} files in Gemini API`);
+
+      return files;
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+
+      if (fetchError.name === 'AbortError') {
+        console.warn('❌ Firebase Background: Gemini API request timed out after 15 seconds');
+        return [];
+      }
+      throw fetchError;
     }
-
-    const data = await response.json();
-    const files = data.files || [];
-
-    console.log(`🔍 Firebase Background: Found ${files.length} files in Gemini API`);
-
-    return files;
   } catch (error) {
     console.error('❌ Firebase Background: Error getting Gemini files:', error);
     return [];
