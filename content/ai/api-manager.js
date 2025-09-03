@@ -381,16 +381,21 @@ class APIKeyManager {
   async cleanupOldSessions() {
     try {
       // Check if storage manager is available and extension context is valid
-      if (!window.storageManager || !window.storageManager.isExtensionContextValid()) {
-        console.warn('aiFiverr: Cannot cleanup sessions - storage unavailable or context invalidated');
+      if (!window.storageManager) {
+        // Silently skip cleanup if storage manager is not available
         return;
       }
 
-      const allSessions = await storageManager.getAllSessions();
+      if (!window.storageManager.isExtensionContextValid()) {
+        // Silently skip cleanup if context is invalid - this is normal during extension reload
+        return;
+      }
+
+      const allSessions = await window.storageManager.getAllSessions();
 
       // Validate sessions data
       if (!allSessions || typeof allSessions !== 'object') {
-        console.warn('aiFiverr: Invalid sessions data for cleanup');
+        // Silently skip cleanup for invalid data to reduce console spam
         return;
       }
 
@@ -404,7 +409,7 @@ class APIKeyManager {
             sessionsToRemove.push(sessionId);
           }
         } catch (error) {
-          console.warn(`aiFiverr: Error processing session ${sessionId}:`, error);
+          // Silently handle individual session processing errors
         }
       });
 
@@ -412,11 +417,19 @@ class APIKeyManager {
         try {
           this.sessionKeys.delete(sessionId);
         } catch (error) {
-          console.warn(`aiFiverr: Error removing session ${sessionId}:`, error);
+          // Silently handle individual session removal errors
         }
       });
+
+      // Only log if sessions were actually cleaned up
+      if (sessionsToRemove.length > 0) {
+        console.log(`aiFiverr: Cleaned up ${sessionsToRemove.length} old session assignments`);
+      }
     } catch (error) {
-      console.error('aiFiverr: Failed to cleanup old sessions:', error);
+      // Only log actual errors, not context invalidation
+      if (!error.message.includes('context invalidated') && !error.message.includes('storage unavailable')) {
+        console.error('aiFiverr: Failed to cleanup old sessions:', error);
+      }
     }
   }
 

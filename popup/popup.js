@@ -1101,16 +1101,14 @@ class PopupManager {
 
       // Apply exact UI fix code as provided
       const $0 = countElement; // Reference element for the fix
-      const titleElement = $0.previousElementSibling;
-      if (titleElement) {
-        await this.setElementStyles(titleElement, {
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        });
-      }
+      await this.setElementStyles($0.previousElementSibling, {
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+        textOverflow: 'ellipsis'
+      });
+
       const data = {
-        applied: !!titleElement,
+        applied: !!$0.previousElementSibling,
       };
       console.log('Custom prompt title styling applied:', data);
     }
@@ -2055,18 +2053,47 @@ class PopupManager {
 
   async sendMessageToTab(message) {
     if (!this.currentTabId) {
-      throw new Error('No active tab');
+      return { success: false, error: 'No active tab' };
     }
 
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
       try {
-        chrome.tabs.sendMessage(this.currentTabId, message, (response) => {
-          if (chrome.runtime.lastError) {
-            const errorMessage = chrome.runtime.lastError.message || 'Unknown runtime error';
-            console.warn('aiFiverr Popup: Tab message error:', errorMessage);
-            resolve({ success: false, error: errorMessage });
+        // First, validate that the tab still exists and is accessible
+        try {
+          const tab = await chrome.tabs.get(this.currentTabId);
+          if (!tab || tab.discarded) {
+            resolve({ success: false, error: 'Tab is no longer available' });
             return;
           }
+        } catch (tabError) {
+          resolve({ success: false, error: 'Tab is no longer accessible' });
+          return;
+        }
+
+        // Set a timeout for tab communication
+        const timeout = setTimeout(() => {
+          resolve({ success: false, error: 'Tab communication timeout' });
+        }, 10000); // 10 second timeout
+
+        chrome.tabs.sendMessage(this.currentTabId, message, (response) => {
+          clearTimeout(timeout);
+
+          if (chrome.runtime.lastError) {
+            const errorMessage = chrome.runtime.lastError.message || 'Unknown runtime error';
+
+            // Handle specific tab communication errors
+            if (errorMessage.includes('Receiving end does not exist')) {
+              console.log('aiFiverr Popup: Content script not available in tab');
+              resolve({ success: false, error: 'Content script not available' });
+            } else if (errorMessage.includes('Tab was discarded')) {
+              resolve({ success: false, error: 'Tab was discarded' });
+            } else {
+              console.warn('aiFiverr Popup: Tab message error:', errorMessage);
+              resolve({ success: false, error: errorMessage });
+            }
+            return;
+          }
+
           resolve(response || { success: false, error: 'No response' });
         });
       } catch (error) {
@@ -3771,11 +3798,19 @@ class PopupManager {
   // Knowledge Base Files Methods
   async checkGoogleAuth() {
     try {
-      // Use Firebase authentication to match the background service
-      const response = await chrome.runtime.sendMessage({ type: 'FIREBASE_AUTH_STATUS' });
-      return response || { success: false, error: 'No auth response' };
+      // Use Firebase authentication to match the background service with safe messaging
+      const response = await this.sendMessageToBackground({ type: 'FIREBASE_AUTH_STATUS' });
+
+      if (response && response.success) {
+        return response;
+      } else {
+        // Handle authentication failure gracefully
+        const errorMsg = response?.error || 'Authentication check failed';
+        console.log('aiFiverr Popup: Google auth check failed:', errorMsg);
+        return { success: false, error: errorMsg };
+      }
     } catch (error) {
-      console.error('Failed to check Google auth:', error);
+      console.error('aiFiverr Popup: Failed to check Google auth:', error);
       return { success: false, error: error.message };
     }
   }
@@ -4063,13 +4098,21 @@ class PopupManager {
           timeoutPromise
         ]);
       } else {
-        // Show authentication prompt instead of error
-        this.displayKnowledgeBaseFilesError('Please sign in with Google to view files');
+        // Handle specific authentication errors
+        if (authResult.error && authResult.error.includes('Authentication required')) {
+          this.displayKnowledgeBaseFilesError('Please sign in with Google to access your knowledge base files');
+        } else if (authResult.error && authResult.error.includes('Background script not available')) {
+          this.displayKnowledgeBaseFilesError('Extension is loading. Please try again in a moment.');
+        } else {
+          this.displayKnowledgeBaseFilesError('Please sign in with Google to view files');
+        }
       }
     } catch (error) {
       console.error('aiFiverr Popup: Failed to load knowledge base files with auth check:', error);
       if (error.message.includes('timeout')) {
         this.displayKnowledgeBaseFilesError('Loading files is taking too long. Please try again.');
+      } else if (error.message.includes('Authentication required')) {
+        this.displayKnowledgeBaseFilesError('Authentication required to access knowledge base files. Please sign in with Google.');
       } else {
         this.displayKnowledgeBaseFilesError('Failed to load files. Please try again.');
       }
