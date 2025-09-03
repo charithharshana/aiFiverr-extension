@@ -1170,7 +1170,8 @@ class StreamingChatbox {
         if (part.fileData && part.fileData.fileUri) {
           const fileId = part.fileData.fileUri.split('/').pop();
           // Skip parts with suspicious or known stale file IDs
-          if (fileId === 'wrpdb7uq3ddk' || fileId === '46vm361k1btt' || fileId.length < 10) {
+          const knownStaleFileIds = ['wrpdb7uq3ddk', '46vm361k1btt'];
+          if (knownStaleFileIds.includes(fileId) || fileId.length < 10) {
             console.log('🚫 STREAMING CHATBOX: Filtering out stale file from conversation history:', fileId);
             return false;
           }
@@ -1246,7 +1247,14 @@ class StreamingChatbox {
                 mimeType: file.mimeType || 'text/plain'
               }
             });
-            console.log('aiFiverr StreamingChatbox: Added validated file to message:', file.name);
+            console.log('aiFiverr StreamingChatbox: Added validated file to message:', {
+              name: file.name,
+              geminiUri: file.geminiUri,
+              mimeType: file.mimeType,
+              fileId: file.geminiUri.split('/').pop(),
+              size: file.size || 'unknown',
+              lastModified: file.lastModified || 'unknown'
+            });
           }
         }
       }
@@ -2541,8 +2549,9 @@ class StreamingChatbox {
 
         // Extract file ID for additional validation
         const fileId = file.geminiUri.split('/').pop();
-        if (fileId === 'wrpdb7uq3ddk' || fileId.length < 10) {
-          console.warn('🚫 STREAMING CHATBOX: Suspicious file ID detected, skipping:', fileId, file.name);
+        const knownStaleFileIds = ['wrpdb7uq3ddk', '46vm361k1btt'];
+        if (knownStaleFileIds.includes(fileId) || fileId.length < 10) {
+          console.warn('🚫 STREAMING CHATBOX: Suspicious/stale file ID detected, skipping:', fileId, file.name);
           continue;
         }
 
@@ -2574,6 +2583,20 @@ class StreamingChatbox {
     console.log('🧹 STREAMING CHATBOX: Attempting to clean up stale file reference:', fileId);
 
     let cleanedCount = 0;
+
+    // FIRST: Clean up from knowledge base manager if available
+    if (window.knowledgeBaseManager && window.knowledgeBaseManager.removeFileByGeminiUri) {
+      try {
+        const geminiUri = `https://generativelanguage.googleapis.com/v1beta/files/${fileId}`;
+        const kbCleanupResult = await window.knowledgeBaseManager.removeFileByGeminiUri(geminiUri);
+        if (kbCleanupResult) {
+          console.log('🗑️ STREAMING CHATBOX: Removed stale file from knowledge base manager:', fileId);
+          cleanedCount++;
+        }
+      } catch (error) {
+        console.warn('⚠️ STREAMING CHATBOX: Could not clean from knowledge base manager:', error);
+      }
+    }
 
     // Clean up manually attached files
     if (this.manuallyAttachedFiles && Array.isArray(this.manuallyAttachedFiles)) {
@@ -2639,6 +2662,51 @@ class StreamingChatbox {
 
       if (cleanedCount > 0) {
         console.log('✅ STREAMING CHATBOX: Cleaned stale file references from conversation history');
+      }
+    }
+
+    // FINAL: Clean up from text selector sources if available
+    if (window.textSelector) {
+      try {
+        // Clean from lastKnowledgeBaseFiles
+        if (window.textSelector.lastKnowledgeBaseFiles && Array.isArray(window.textSelector.lastKnowledgeBaseFiles)) {
+          const originalLength = window.textSelector.lastKnowledgeBaseFiles.length;
+          window.textSelector.lastKnowledgeBaseFiles = window.textSelector.lastKnowledgeBaseFiles.filter(file => {
+            if (file.geminiUri) {
+              const partFileId = file.geminiUri.split('/').pop();
+              if (partFileId === fileId) {
+                console.log('🗑️ STREAMING CHATBOX: Removed stale file from text selector lastKnowledgeBaseFiles:', partFileId);
+                return false;
+              }
+            }
+            return true;
+          });
+
+          if (window.textSelector.lastKnowledgeBaseFiles.length < originalLength) {
+            cleanedCount++;
+          }
+        }
+
+        // Clean from attachedFiles
+        if (window.textSelector.attachedFiles && Array.isArray(window.textSelector.attachedFiles)) {
+          const originalLength = window.textSelector.attachedFiles.length;
+          window.textSelector.attachedFiles = window.textSelector.attachedFiles.filter(file => {
+            if (file.geminiUri) {
+              const partFileId = file.geminiUri.split('/').pop();
+              if (partFileId === fileId) {
+                console.log('🗑️ STREAMING CHATBOX: Removed stale file from text selector attachedFiles:', partFileId);
+                return false;
+              }
+            }
+            return true;
+          });
+
+          if (window.textSelector.attachedFiles.length < originalLength) {
+            cleanedCount++;
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ STREAMING CHATBOX: Could not clean from text selector:', error);
       }
     }
 
