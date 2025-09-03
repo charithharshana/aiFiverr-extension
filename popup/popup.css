@@ -3462,3 +3462,189 @@ body {
 .tab-content::after {
   display: none !important;
 }
+
+/* Backup Controls Styles */
+.prompts-backup-controls,
+.variables-backup-controls,
+.complete-backup-container {
+  margin-top: 20px;
+  padding: 16px;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+}
+
+.backup-controls-header {
+  margin-bottom: 16px;
+}
+
+.backup-controls-header h5 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 4px;
+}
+
+.backup-description {
+  font-size: 12px;
+  color: #6c757d;
+  margin: 0;
+}
+
+.backup-controls-actions,
+.complete-backup-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.backup-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.backup-group-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #495057;
+  margin-bottom: 4px;
+}
+
+.backup-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.export-section,
+.import-section {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.export-format-select {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  background: white;
+  color: #495057;
+  min-width: 80px;
+}
+
+.export-format-select:focus {
+  border-color: #1dbf73;
+  box-shadow: 0 0 0 2px rgba(29, 191, 115, 0.2);
+}
+
+/* Backup button styles */
+.backup-buttons .btn-primary,
+.backup-buttons .btn-secondary {
+  padding: 6px 12px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.backup-buttons .btn-primary {
+  background: #1dbf73;
+  color: white;
+}
+
+.backup-buttons .btn-primary:hover {
+  background: #17a85e;
+  transform: translateY(-1px);
+}
+
+.backup-buttons .btn-secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.backup-buttons .btn-secondary:hover {
+  background: #5a6268;
+  transform: translateY(-1px);
+}
+
+/* Import options styles */
+.import-options {
+  margin-top: 16px;
+  padding: 12px;
+  background: white;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+}
+
+.import-options h5 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 12px;
+}
+
+.import-option {
+  margin-bottom: 8px;
+}
+
+.import-option label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #495057;
+  cursor: pointer;
+}
+
+.import-option input[type="radio"],
+.import-option input[type="checkbox"] {
+  margin: 0;
+}
+
+.import-option small {
+  display: block;
+  margin-left: 20px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: #6c757d;
+}
+
+.merge-only {
+  margin-left: 20px;
+}
+
+/* Complete backup specific styles */
+.complete-backup-container .backup-info {
+  margin-bottom: 16px;
+}
+
+.complete-backup-container .backup-description {
+  font-size: 13px;
+  color: #495057;
+  line-height: 1.4;
+}
+
+/* Responsive adjustments for backup controls */
+@media (max-width: 420px) {
+  .backup-buttons {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .export-section,
+  .import-section {
+    justify-content: center;
+  }
+
+  .backup-buttons .btn-primary,
+  .backup-buttons .btn-secondary {
+    width: 100%;
+    text-align: center;
+  }
+}

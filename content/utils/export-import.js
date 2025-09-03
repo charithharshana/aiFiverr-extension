@@ -30,7 +30,10 @@ class ExportImportManager {
       
       // Export knowledge base
       exportData.data.knowledgeBase = await this.exportKnowledgeBase();
-      
+
+      // Export custom prompts
+      exportData.data.customPrompts = await this.exportCustomPrompts();
+
       // Export API keys (encrypted)
       exportData.data.apiKeys = await this.exportApiKeys();
       
@@ -99,6 +102,32 @@ class ExportImportManager {
     } catch (error) {
       console.error('Knowledge base export failed:', error);
       return { items: {} };
+    }
+  }
+
+  /**
+   * Export custom prompts
+   */
+  async exportCustomPrompts() {
+    try {
+      const customPrompts = await storageManager.get('customPrompts') || {};
+      const favoritePrompts = await storageManager.get('favoritePrompts') || [];
+
+      return {
+        customPrompts: customPrompts.customPrompts || {},
+        favoritePrompts: favoritePrompts.favoritePrompts || [],
+        totalPrompts: Object.keys(customPrompts.customPrompts || {}).length,
+        totalFavorites: (favoritePrompts.favoritePrompts || []).length,
+        exportedAt: Date.now()
+      };
+    } catch (error) {
+      console.error('Custom prompts export failed:', error);
+      return {
+        customPrompts: {},
+        favoritePrompts: [],
+        totalPrompts: 0,
+        totalFavorites: 0
+      };
     }
   }
 
@@ -451,6 +480,15 @@ class ExportImportManager {
         }
       }
 
+      // Import custom prompts
+      if (importData.data?.customPrompts) {
+        try {
+          results.customPrompts = await this.importCustomPrompts(importData.data.customPrompts, options);
+        } catch (error) {
+          results.errors.push(`Custom prompts import failed: ${error.message}`);
+        }
+      }
+
       // Import API keys
       if (importData.data?.apiKeys && options.importApiKeys) {
         try {
@@ -529,6 +567,66 @@ class ExportImportManager {
   async importKnowledgeBase(knowledgeBaseData) {
     if (knowledgeBaseData.items) {
       await storageManager.saveKnowledgeBase(knowledgeBaseData.items);
+    }
+  }
+
+  /**
+   * Import custom prompts
+   */
+  async importCustomPrompts(customPromptsData, options = {}) {
+    try {
+      let importedCount = 0;
+      let conflictCount = 0;
+
+      if (!customPromptsData.customPrompts) {
+        return { imported: 0, conflicts: 0 };
+      }
+
+      // Get existing data
+      const existingCustomPrompts = await storageManager.get('customPrompts') || {};
+      const existingFavoritePrompts = await storageManager.get('favoritePrompts') || [];
+
+      const currentCustomPrompts = existingCustomPrompts.customPrompts || {};
+      const currentFavoritePrompts = existingFavoritePrompts.favoritePrompts || [];
+
+      // Handle custom prompts
+      const mergedCustomPrompts = options.merge ? { ...currentCustomPrompts } : {};
+
+      for (const [key, prompt] of Object.entries(customPromptsData.customPrompts)) {
+        if (currentCustomPrompts[key] && options.merge) {
+          // Handle conflict
+          if (options.overwriteConflicts) {
+            mergedCustomPrompts[key] = prompt;
+            conflictCount++;
+          } else {
+            conflictCount++;
+            continue; // Skip this prompt
+          }
+        } else {
+          mergedCustomPrompts[key] = prompt;
+          importedCount++;
+        }
+      }
+
+      // Handle favorite prompts
+      const mergedFavoritePrompts = options.merge
+        ? [...new Set([...currentFavoritePrompts, ...(customPromptsData.favoritePrompts || [])])]
+        : (customPromptsData.favoritePrompts || []);
+
+      // Save merged data
+      await storageManager.set({
+        customPrompts: mergedCustomPrompts,
+        favoritePrompts: mergedFavoritePrompts
+      });
+
+      return {
+        imported: importedCount,
+        conflicts: conflictCount,
+        totalFavorites: mergedFavoritePrompts.length
+      };
+    } catch (error) {
+      console.error('Import custom prompts failed:', error);
+      throw new Error(`Failed to import custom prompts: ${error.message}`);
     }
   }
 
@@ -684,9 +782,437 @@ class ExportImportManager {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => resolve(e.target.result);
-      reader.onerror = (e) => reject(new Error('Failed to read file'));
+      reader.onerror = () => reject(new Error('Failed to read file'));
       reader.readAsText(file);
     });
+  }
+
+  /**
+   * Export only custom prompts to local file
+   */
+  async exportCustomPromptsOnly(format = 'json') {
+    try {
+      const customPromptsData = await this.exportCustomPrompts();
+
+      const exportData = {
+        version: this.exportVersion,
+        timestamp: Date.now(),
+        exportedAt: new Date().toISOString(),
+        type: 'custom_prompts',
+        format: format,
+        data: customPromptsData
+      };
+
+      return this.formatExportData(exportData, format, 'custom-prompts');
+    } catch (error) {
+      console.error('Custom prompts only export failed:', error);
+      throw new Error('Failed to export custom prompts');
+    }
+  }
+
+  /**
+   * Export only knowledge base to local file
+   */
+  async exportKnowledgeBaseOnly(format = 'json') {
+    try {
+      const knowledgeBaseData = await this.exportKnowledgeBase();
+
+      const exportData = {
+        version: this.exportVersion,
+        timestamp: Date.now(),
+        exportedAt: new Date().toISOString(),
+        type: 'knowledge_base',
+        format: format,
+        data: knowledgeBaseData
+      };
+
+      return this.formatExportData(exportData, format, 'knowledge-base');
+    } catch (error) {
+      console.error('Knowledge base only export failed:', error);
+      throw new Error('Failed to export knowledge base');
+    }
+  }
+
+  /**
+   * Export settings (custom prompts + knowledge base) to local file
+   */
+  async exportSettingsOnly(format = 'json') {
+    try {
+      const customPromptsData = await this.exportCustomPrompts();
+      const knowledgeBaseData = await this.exportKnowledgeBase();
+
+      const exportData = {
+        version: this.exportVersion,
+        timestamp: Date.now(),
+        exportedAt: new Date().toISOString(),
+        type: 'settings',
+        format: format,
+        data: {
+          customPrompts: customPromptsData,
+          knowledgeBase: knowledgeBaseData
+        }
+      };
+
+      return this.formatExportData(exportData, format, 'settings');
+    } catch (error) {
+      console.error('Settings only export failed:', error);
+      throw new Error('Failed to export settings');
+    }
+  }
+
+  /**
+   * Format export data with appropriate filename prefix
+   */
+  formatExportData(exportData, format, filePrefix) {
+    const timestamp = new Date().toISOString().split('T')[0];
+
+    switch (format) {
+      case 'json':
+        return {
+          content: JSON.stringify(exportData, null, 2),
+          filename: `aifiverr-${filePrefix}-${timestamp}.json`,
+          mimeType: 'application/json'
+        };
+
+      case 'markdown':
+        return {
+          content: this.convertSettingsToMarkdown(exportData),
+          filename: `aifiverr-${filePrefix}-${timestamp}.md`,
+          mimeType: 'text/markdown'
+        };
+
+      default:
+        throw new Error(`Unsupported export format: ${format}`);
+    }
+  }
+
+  /**
+   * Convert settings export data to markdown format
+   */
+  convertSettingsToMarkdown(exportData) {
+    let markdown = `# aiFiverr ${exportData.type.replace('_', ' ').toUpperCase()} Export\n\n`;
+    markdown += `**Export Date:** ${exportData.exportedAt}\n`;
+    markdown += `**Export Type:** ${exportData.type}\n`;
+    markdown += `**Version:** ${exportData.version}\n\n`;
+
+    // Handle different export types
+    if (exportData.type === 'custom_prompts') {
+      return this.convertCustomPromptsToMarkdown(exportData, markdown);
+    } else if (exportData.type === 'knowledge_base') {
+      return this.convertKnowledgeBaseToMarkdown(exportData, markdown);
+    } else if (exportData.type === 'settings') {
+      return this.convertAllSettingsToMarkdown(exportData, markdown);
+    }
+
+    return markdown;
+  }
+
+  /**
+   * Convert custom prompts to markdown
+   */
+  convertCustomPromptsToMarkdown(exportData, markdown) {
+    const data = exportData.data;
+
+    markdown += `## Summary\n\n`;
+    markdown += `- **Total Prompts:** ${data.totalPrompts}\n`;
+    markdown += `- **Total Favorites:** ${data.totalFavorites}\n\n`;
+
+    if (data.customPrompts && Object.keys(data.customPrompts).length > 0) {
+      markdown += `## Custom Prompts\n\n`;
+      Object.entries(data.customPrompts).forEach(([key, prompt]) => {
+        markdown += `### ${prompt.name} (${key})\n\n`;
+        markdown += `**Description:** ${prompt.description || 'No description'}\n\n`;
+        markdown += `**Content:**\n\`\`\`\n${prompt.prompt}\n\`\`\`\n\n`;
+        if (prompt.knowledgeBaseFiles && prompt.knowledgeBaseFiles.length > 0) {
+          markdown += `**Knowledge Base Files:** ${prompt.knowledgeBaseFiles.join(', ')}\n\n`;
+        }
+        markdown += `**Created:** ${new Date(prompt.created).toLocaleString()}\n`;
+        markdown += `**Modified:** ${new Date(prompt.modified).toLocaleString()}\n\n`;
+        markdown += `---\n\n`;
+      });
+    }
+
+    if (data.favoritePrompts && data.favoritePrompts.length > 0) {
+      markdown += `## Favorite Prompts\n\n`;
+      data.favoritePrompts.forEach(promptKey => {
+        markdown += `- ${promptKey}\n`;
+      });
+      markdown += `\n`;
+    }
+
+    return markdown;
+  }
+
+  /**
+   * Convert knowledge base to markdown
+   */
+  convertKnowledgeBaseToMarkdown(exportData, markdown) {
+    const data = exportData.data;
+
+    if (data.items && Object.keys(data.items).length > 0) {
+      markdown += `## Knowledge Base Variables\n\n`;
+      Object.entries(data.items).forEach(([key, value]) => {
+        markdown += `### {{${key}}}\n\n`;
+        markdown += `\`\`\`\n${value}\n\`\`\`\n\n`;
+      });
+    } else {
+      markdown += `## Knowledge Base Variables\n\n`;
+      markdown += `No variables found.\n\n`;
+    }
+
+    return markdown;
+  }
+
+  /**
+   * Convert all settings to markdown
+   */
+  convertAllSettingsToMarkdown(exportData, markdown) {
+    const customPrompts = exportData.data.customPrompts;
+    const knowledgeBase = exportData.data.knowledgeBase;
+
+    markdown += `## Summary\n\n`;
+    markdown += `- **Total Prompts:** ${customPrompts.totalPrompts}\n`;
+    markdown += `- **Total Favorites:** ${customPrompts.totalFavorites}\n`;
+    markdown += `- **Total Variables:** ${Object.keys(knowledgeBase.items || {}).length}\n\n`;
+
+    // Add custom prompts section
+    if (customPrompts.customPrompts && Object.keys(customPrompts.customPrompts).length > 0) {
+      markdown += `## Custom Prompts\n\n`;
+      Object.entries(customPrompts.customPrompts).forEach(([key, prompt]) => {
+        markdown += `### ${prompt.name} (${key})\n\n`;
+        markdown += `**Description:** ${prompt.description || 'No description'}\n\n`;
+        markdown += `**Content:**\n\`\`\`\n${prompt.prompt}\n\`\`\`\n\n`;
+        if (prompt.knowledgeBaseFiles && prompt.knowledgeBaseFiles.length > 0) {
+          markdown += `**Knowledge Base Files:** ${prompt.knowledgeBaseFiles.join(', ')}\n\n`;
+        }
+        markdown += `**Created:** ${new Date(prompt.created).toLocaleString()}\n`;
+        markdown += `**Modified:** ${new Date(prompt.modified).toLocaleString()}\n\n`;
+        markdown += `---\n\n`;
+      });
+    }
+
+    // Add knowledge base section
+    if (knowledgeBase.items && Object.keys(knowledgeBase.items).length > 0) {
+      markdown += `## Knowledge Base Variables\n\n`;
+      Object.entries(knowledgeBase.items).forEach(([key, value]) => {
+        markdown += `### {{${key}}}\n\n`;
+        markdown += `\`\`\`\n${value}\n\`\`\`\n\n`;
+      });
+    }
+
+    // Add favorites section
+    if (customPrompts.favoritePrompts && customPrompts.favoritePrompts.length > 0) {
+      markdown += `## Favorite Prompts\n\n`;
+      customPrompts.favoritePrompts.forEach(promptKey => {
+        markdown += `- ${promptKey}\n`;
+      });
+      markdown += `\n`;
+    }
+
+    return markdown;
+  }
+
+  /**
+   * Import only custom prompts from file content
+   */
+  async importCustomPromptsOnly(fileContent, options = {}) {
+    try {
+      let importData;
+
+      // Try to parse as JSON
+      try {
+        importData = JSON.parse(fileContent);
+      } catch (jsonError) {
+        throw new Error('Invalid file format: must be JSON');
+      }
+
+      // Validate import data
+      if (!importData.data || (!importData.data.customPrompts && !importData.data.customPrompts)) {
+        throw new Error('Invalid import file: no custom prompts data found');
+      }
+
+      // Handle different export types
+      let customPromptsData;
+      if (importData.type === 'custom_prompts') {
+        customPromptsData = importData.data;
+      } else if (importData.type === 'settings' || importData.type === 'all_settings') {
+        customPromptsData = importData.data.customPrompts;
+      } else {
+        throw new Error('Invalid import file: not a custom prompts export');
+      }
+
+      // Import the data
+      const result = await this.importCustomPrompts(customPromptsData, options);
+
+      return {
+        success: true,
+        imported: result.imported,
+        conflicts: result.conflicts,
+        totalFavorites: result.totalFavorites,
+        message: `Imported ${result.imported} custom prompts${result.conflicts > 0 ? `, ${result.conflicts} conflicts ${options.overwriteConflicts ? 'resolved' : 'skipped'}` : ''}`
+      };
+    } catch (error) {
+      console.error('Import custom prompts only failed:', error);
+      throw new Error(`Failed to import custom prompts: ${error.message}`);
+    }
+  }
+
+  /**
+   * Import only knowledge base from file content
+   */
+  async importKnowledgeBaseOnly(fileContent, options = {}) {
+    try {
+      let importData;
+
+      // Try to parse as JSON
+      try {
+        importData = JSON.parse(fileContent);
+      } catch (jsonError) {
+        throw new Error('Invalid file format: must be JSON');
+      }
+
+      // Validate import data
+      if (!importData.data || !importData.data.knowledgeBase && !importData.data.items) {
+        throw new Error('Invalid import file: no knowledge base data found');
+      }
+
+      // Handle different export types
+      let knowledgeBaseData;
+      if (importData.type === 'knowledge_base') {
+        knowledgeBaseData = importData.data;
+      } else if (importData.type === 'settings' || importData.type === 'all_settings') {
+        knowledgeBaseData = importData.data.knowledgeBase;
+      } else {
+        throw new Error('Invalid import file: not a knowledge base export');
+      }
+
+      // Import the data
+      if (options.merge) {
+        // Merge with existing knowledge base
+        const existingKB = await storageManager.getKnowledgeBase() || {};
+        const newItems = knowledgeBaseData.items || {};
+
+        let imported = 0;
+        let conflicts = 0;
+        const mergedKB = { ...existingKB };
+
+        for (const [key, value] of Object.entries(newItems)) {
+          if (existingKB[key]) {
+            conflicts++;
+            if (options.overwriteConflicts) {
+              mergedKB[key] = value;
+            }
+          } else {
+            mergedKB[key] = value;
+            imported++;
+          }
+        }
+
+        await storageManager.saveKnowledgeBase(mergedKB);
+
+        return {
+          success: true,
+          imported,
+          conflicts,
+          message: `Imported ${imported} variables${conflicts > 0 ? `, ${conflicts} conflicts ${options.overwriteConflicts ? 'resolved' : 'skipped'}` : ''}`
+        };
+      } else {
+        // Replace existing knowledge base
+        await this.importKnowledgeBase(knowledgeBaseData);
+        const itemCount = Object.keys(knowledgeBaseData.items || {}).length;
+
+        return {
+          success: true,
+          imported: itemCount,
+          conflicts: 0,
+          message: `Imported ${itemCount} variables`
+        };
+      }
+    } catch (error) {
+      console.error('Import knowledge base only failed:', error);
+      throw new Error(`Failed to import knowledge base: ${error.message}`);
+    }
+  }
+
+  /**
+   * Import settings (custom prompts + knowledge base) from file content
+   */
+  async importSettingsOnly(fileContent, options = {}) {
+    try {
+      let importData;
+
+      // Try to parse as JSON
+      try {
+        importData = JSON.parse(fileContent);
+      } catch (jsonError) {
+        throw new Error('Invalid file format: must be JSON');
+      }
+
+      // Validate import data
+      if (!importData.data) {
+        throw new Error('Invalid import file: no data found');
+      }
+
+      const results = {
+        success: false,
+        customPrompts: null,
+        knowledgeBase: null,
+        errors: []
+      };
+
+      // Import custom prompts if available
+      if (importData.data.customPrompts || (importData.type === 'custom_prompts' && importData.data)) {
+        try {
+          const customPromptsData = importData.type === 'custom_prompts' ? importData.data : importData.data.customPrompts;
+          results.customPrompts = await this.importCustomPrompts(customPromptsData, options);
+        } catch (error) {
+          results.errors.push(`Custom prompts import failed: ${error.message}`);
+        }
+      }
+
+      // Import knowledge base if available
+      if (importData.data.knowledgeBase || (importData.type === 'knowledge_base' && importData.data)) {
+        try {
+          const knowledgeBaseData = importData.type === 'knowledge_base' ? importData.data : importData.data.knowledgeBase;
+
+          if (options.merge) {
+            const existingKB = await storageManager.getKnowledgeBase() || {};
+            const newItems = knowledgeBaseData.items || {};
+
+            let imported = 0;
+            let conflicts = 0;
+            const mergedKB = { ...existingKB };
+
+            for (const [key, value] of Object.entries(newItems)) {
+              if (existingKB[key]) {
+                conflicts++;
+                if (options.overwriteConflicts) {
+                  mergedKB[key] = value;
+                }
+              } else {
+                mergedKB[key] = value;
+                imported++;
+              }
+            }
+
+            await storageManager.saveKnowledgeBase(mergedKB);
+            results.knowledgeBase = { imported, conflicts };
+          } else {
+            await this.importKnowledgeBase(knowledgeBaseData);
+            results.knowledgeBase = { imported: Object.keys(knowledgeBaseData.items || {}).length, conflicts: 0 };
+          }
+        } catch (error) {
+          results.errors.push(`Knowledge base import failed: ${error.message}`);
+        }
+      }
+
+      results.success = results.customPrompts || results.knowledgeBase;
+
+      return results;
+    } catch (error) {
+      console.error('Import settings only failed:', error);
+      throw new Error(`Failed to import settings: ${error.message}`);
+    }
   }
 }
 

@@ -31,15 +31,19 @@ class PopupManager {
       // Load initial data
       await this.loadDashboardData();
 
-      // Initialize Knowledge Base Files if on files tab
+      // Initialize Knowledge Base Files if on files tab and user is authenticated
       const activeTab = document.querySelector('.kb-tab-btn.active');
       if (activeTab && activeTab.dataset.tab === 'files') {
-        await this.loadKnowledgeBaseFiles();
+        await this.loadKnowledgeBaseFilesWithAuthCheck();
       }
 
-      // Also initialize files data in background for faster switching
-      setTimeout(() => {
-        this.loadKnowledgeBaseFiles();
+      // Don't automatically load files in background on fresh install
+      // Only load if user has previously authenticated
+      setTimeout(async () => {
+        const authStatus = await this.checkGoogleAuth();
+        if (authStatus.success) {
+          this.loadKnowledgeBaseFiles();
+        }
       }, 1000);
     } catch (error) {
       console.error('Popup initialization failed:', error);
@@ -441,6 +445,9 @@ class PopupManager {
       e.preventDefault();
       chrome.tabs.create({ url: 'https://github.com/charithharshana/aiFiverr-extension' });
     });
+
+    // Backup/Sync event listeners
+    this.setupBackupSyncEventListeners();
 
     // Keyboard shortcut editor
     this.setupShortcutEditor();
@@ -3317,6 +3324,9 @@ class PopupManager {
       if (response && response.success) {
         this.showToast('Successfully signed in!', 'success');
         await this.checkAuthStatus();
+
+        // Trigger automatic sync of settings after successful authentication
+        await this.performAutoSyncAfterAuth();
       } else {
         // Check if this is an Edge compatibility issue
         if (response?.isEdgeCompatibilityIssue) {
@@ -3627,6 +3637,572 @@ class PopupManager {
     }
   }
 
+  /**
+   * Perform automatic sync of settings after successful authentication
+   */
+  async performAutoSyncAfterAuth() {
+    try {
+      console.log('aiFiverr Popup: Starting automatic sync after authentication...');
+
+      // Check if settings backup manager is available
+      if (!window.settingsBackupManager) {
+        console.log('aiFiverr Popup: Settings backup manager not available, skipping auto-sync');
+        return;
+      }
+
+      // Initialize the backup manager
+      await window.settingsBackupManager.init();
+
+      // Perform auto-sync with merge mode enabled and no overwrite conflicts by default
+      const syncOptions = {
+        merge: true,
+        overwriteConflicts: false // Don't overwrite existing data by default
+      };
+
+      const syncResults = await window.settingsBackupManager.autoSyncOnAuthentication(syncOptions);
+
+      if (syncResults.success) {
+        let syncMessage = 'Settings synced from Google Drive';
+        const syncDetails = [];
+
+        if (syncResults.customPrompts?.success) {
+          const promptResult = syncResults.customPrompts;
+          if (promptResult.imported > 0) {
+            syncDetails.push(`${promptResult.imported} prompts restored`);
+          }
+          if (promptResult.conflicts > 0) {
+            syncDetails.push(`${promptResult.conflicts} prompt conflicts skipped`);
+          }
+        }
+
+        if (syncResults.knowledgeBase?.success) {
+          const kbResult = syncResults.knowledgeBase;
+          if (kbResult.imported > 0) {
+            syncDetails.push(`${kbResult.imported} variables restored`);
+          }
+          if (kbResult.conflicts > 0) {
+            syncDetails.push(`${kbResult.conflicts} variable conflicts skipped`);
+          }
+        }
+
+        if (syncDetails.length > 0) {
+          syncMessage += ': ' + syncDetails.join(', ');
+          this.showToast(syncMessage, 'success');
+
+          // Refresh the UI to show synced data
+          await this.loadSettings();
+        } else {
+          console.log('aiFiverr Popup: Auto-sync completed but no new data was restored');
+        }
+      } else {
+        console.log('aiFiverr Popup: Auto-sync found no backups to restore');
+      }
+
+    } catch (error) {
+      console.error('aiFiverr Popup: Auto-sync after authentication failed:', error);
+      // Don't show error toast for auto-sync failures as they're not critical
+      // The user can manually sync if needed
+    }
+  }
+
+  /**
+   * Setup backup and sync event listeners
+   */
+  setupBackupSyncEventListeners() {
+    // Custom Prompts Export/Import
+    document.getElementById('exportPromptsBtn')?.addEventListener('click', () => {
+      this.exportCustomPrompts();
+    });
+
+    document.getElementById('importPromptsBtn')?.addEventListener('click', () => {
+      document.getElementById('promptsImportFile').click();
+    });
+
+    document.getElementById('promptsImportFile')?.addEventListener('change', (e) => {
+      this.importCustomPrompts(e.target.files[0]);
+    });
+
+    // Custom Prompts Google Drive Sync
+    document.getElementById('backupPromptsToGDriveBtn')?.addEventListener('click', () => {
+      this.backupCustomPromptsToGoogleDrive();
+    });
+
+    document.getElementById('restorePromptsFromGDriveBtn')?.addEventListener('click', () => {
+      this.restoreCustomPromptsFromGoogleDrive();
+    });
+
+    // Knowledge Base Variables Export/Import
+    document.getElementById('exportVariablesBtn')?.addEventListener('click', () => {
+      this.exportKnowledgeBaseVariables();
+    });
+
+    document.getElementById('importVariablesBtn')?.addEventListener('click', () => {
+      document.getElementById('variablesImportFile').click();
+    });
+
+    document.getElementById('variablesImportFile')?.addEventListener('change', (e) => {
+      this.importKnowledgeBaseVariables(e.target.files[0]);
+    });
+
+    // Knowledge Base Variables Google Drive Sync
+    document.getElementById('backupVariablesToGDriveBtn')?.addEventListener('click', () => {
+      this.backupKnowledgeBaseToGoogleDrive();
+    });
+
+    document.getElementById('restoreVariablesFromGDriveBtn')?.addEventListener('click', () => {
+      this.restoreKnowledgeBaseFromGoogleDrive();
+    });
+
+    // Complete Settings Export/Import
+    document.getElementById('exportAllSettingsBtn')?.addEventListener('click', () => {
+      this.exportAllSettings();
+    });
+
+    document.getElementById('importAllSettingsBtn')?.addEventListener('click', () => {
+      this.showImportOptions();
+      document.getElementById('completeImportFile').click();
+    });
+
+    document.getElementById('completeImportFile')?.addEventListener('change', (e) => {
+      this.importAllSettings(e.target.files[0]);
+    });
+
+    // Complete Settings Google Drive Sync
+    document.getElementById('backupAllToGDriveBtn')?.addEventListener('click', () => {
+      this.backupAllSettingsToGoogleDrive();
+    });
+
+    document.getElementById('restoreAllFromGDriveBtn')?.addEventListener('click', () => {
+      this.restoreAllSettingsFromGoogleDrive();
+    });
+
+    // Import mode radio buttons
+    document.querySelectorAll('input[name="importMode"]').forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        const mergeOptions = document.querySelector('.merge-only');
+        if (e.target.value === 'merge') {
+          mergeOptions.style.display = 'block';
+        } else {
+          mergeOptions.style.display = 'none';
+        }
+      });
+    });
+  }
+
+  /**
+   * Show import options panel
+   */
+  showImportOptions() {
+    const importOptions = document.getElementById('importOptions');
+    if (importOptions) {
+      importOptions.style.display = 'block';
+    }
+  }
+
+  /**
+   * Get import options from UI
+   */
+  getImportOptions() {
+    const importMode = document.querySelector('input[name="importMode"]:checked')?.value || 'replace';
+    const overwriteConflicts = document.getElementById('overwriteConflicts')?.checked || false;
+
+    return {
+      merge: importMode === 'merge',
+      overwriteConflicts: overwriteConflicts
+    };
+  }
+
+  // Export Methods
+  /**
+   * Export custom prompts to local file
+   */
+  async exportCustomPrompts() {
+    try {
+      this.showLoading(true);
+
+      if (!window.exportImportManager) {
+        window.initializeExportImportManager();
+      }
+
+      const format = document.getElementById('promptsExportFormat')?.value || 'json';
+      const exportData = await window.exportImportManager.exportCustomPromptsOnly(format);
+
+      this.downloadFile(exportData);
+      this.showToast(`Custom prompts exported as ${format.toUpperCase()}`, 'success');
+    } catch (error) {
+      console.error('Export custom prompts failed:', error);
+      this.showToast(`Failed to export custom prompts: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  /**
+   * Export knowledge base variables to local file
+   */
+  async exportKnowledgeBaseVariables() {
+    try {
+      this.showLoading(true);
+
+      if (!window.exportImportManager) {
+        window.initializeExportImportManager();
+      }
+
+      const format = document.getElementById('variablesExportFormat')?.value || 'json';
+      const exportData = await window.exportImportManager.exportKnowledgeBaseOnly(format);
+
+      this.downloadFile(exportData);
+      this.showToast(`Knowledge base exported as ${format.toUpperCase()}`, 'success');
+    } catch (error) {
+      console.error('Export knowledge base failed:', error);
+      this.showToast(`Failed to export knowledge base: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  /**
+   * Export all settings to local file
+   */
+  async exportAllSettings() {
+    try {
+      this.showLoading(true);
+
+      if (!window.exportImportManager) {
+        window.initializeExportImportManager();
+      }
+
+      const format = document.getElementById('completeExportFormat')?.value || 'json';
+      const exportData = await window.exportImportManager.exportSettingsOnly(format);
+
+      this.downloadFile(exportData);
+      this.showToast(`All settings exported as ${format.toUpperCase()}`, 'success');
+    } catch (error) {
+      console.error('Export all settings failed:', error);
+      this.showToast(`Failed to export all settings: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  // Import Methods
+  /**
+   * Import custom prompts from local file
+   */
+  async importCustomPrompts(file) {
+    if (!file) return;
+
+    try {
+      this.showLoading(true);
+
+      if (!window.exportImportManager) {
+        window.initializeExportImportManager();
+      }
+
+      const fileContent = await this.readFileContent(file);
+      const options = this.getImportOptions();
+
+      const result = await window.exportImportManager.importCustomPromptsOnly(fileContent, options);
+
+      if (result.success) {
+        await this.loadPrompts(); // Refresh the prompts display
+        this.showToast(result.message, 'success');
+      } else {
+        throw new Error(result.message || 'Import failed');
+      }
+    } catch (error) {
+      console.error('Import custom prompts failed:', error);
+      this.showToast(`Failed to import custom prompts: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+      // Reset file input
+      document.getElementById('promptsImportFile').value = '';
+    }
+  }
+
+  /**
+   * Import knowledge base variables from local file
+   */
+  async importKnowledgeBaseVariables(file) {
+    if (!file) return;
+
+    try {
+      this.showLoading(true);
+
+      if (!window.exportImportManager) {
+        window.initializeExportImportManager();
+      }
+
+      const fileContent = await this.readFileContent(file);
+      const options = this.getImportOptions();
+
+      const result = await window.exportImportManager.importKnowledgeBaseOnly(fileContent, options);
+
+      if (result.success) {
+        await this.loadKnowledgeBase(); // Refresh the knowledge base display
+        this.showToast(result.message, 'success');
+      } else {
+        throw new Error(result.message || 'Import failed');
+      }
+    } catch (error) {
+      console.error('Import knowledge base failed:', error);
+      this.showToast(`Failed to import knowledge base: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+      // Reset file input
+      document.getElementById('variablesImportFile').value = '';
+    }
+  }
+
+  /**
+   * Import all settings from local file
+   */
+  async importAllSettings(file) {
+    if (!file) return;
+
+    try {
+      this.showLoading(true);
+
+      if (!window.exportImportManager) {
+        window.initializeExportImportManager();
+      }
+
+      const fileContent = await this.readFileContent(file);
+      const options = this.getImportOptions();
+
+      const result = await window.exportImportManager.importSettingsOnly(fileContent, options);
+
+      if (result.success) {
+        // Refresh all displays
+        await this.loadPrompts();
+        await this.loadKnowledgeBase();
+
+        const messages = [];
+        if (result.customPrompts) {
+          messages.push(`${result.customPrompts.imported} prompts imported`);
+        }
+        if (result.knowledgeBase) {
+          messages.push(`${result.knowledgeBase.imported} variables imported`);
+        }
+
+        this.showToast(`Settings imported: ${messages.join(', ')}`, 'success');
+      } else {
+        throw new Error('Import failed');
+      }
+    } catch (error) {
+      console.error('Import all settings failed:', error);
+      this.showToast(`Failed to import settings: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+      // Reset file input
+      document.getElementById('completeImportFile').value = '';
+      // Hide import options
+      document.getElementById('importOptions').style.display = 'none';
+    }
+  }
+
+  // Google Drive Backup Methods
+  /**
+   * Backup custom prompts to Google Drive
+   */
+  async backupCustomPromptsToGoogleDrive() {
+    try {
+      this.showLoading(true);
+
+      if (!window.settingsBackupManager) {
+        this.showToast('Settings backup manager not available', 'error');
+        return;
+      }
+
+      await window.settingsBackupManager.init();
+      const result = await window.settingsBackupManager.backupCustomPromptsToGoogleDrive();
+
+      if (result.success) {
+        this.showToast(`${result.promptCount} prompts backed up to Google Drive`, 'success');
+      } else {
+        throw new Error(result.message || 'Backup failed');
+      }
+    } catch (error) {
+      console.error('Backup custom prompts to Google Drive failed:', error);
+      this.showToast(`Failed to backup to Google Drive: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  /**
+   * Restore custom prompts from Google Drive
+   */
+  async restoreCustomPromptsFromGoogleDrive() {
+    try {
+      this.showLoading(true);
+
+      if (!window.settingsBackupManager) {
+        this.showToast('Settings backup manager not available', 'error');
+        return;
+      }
+
+      await window.settingsBackupManager.init();
+      const options = { merge: true, overwriteConflicts: false };
+      const result = await window.settingsBackupManager.restoreCustomPromptsFromGoogleDrive(options);
+
+      if (result.success) {
+        await this.loadPrompts(); // Refresh the prompts display
+        this.showToast(`${result.imported} prompts restored from Google Drive`, 'success');
+      } else {
+        this.showToast(result.message || 'No backup found', 'info');
+      }
+    } catch (error) {
+      console.error('Restore custom prompts from Google Drive failed:', error);
+      this.showToast(`Failed to restore from Google Drive: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  /**
+   * Backup knowledge base to Google Drive
+   */
+  async backupKnowledgeBaseToGoogleDrive() {
+    try {
+      this.showLoading(true);
+
+      if (!window.settingsBackupManager) {
+        this.showToast('Settings backup manager not available', 'error');
+        return;
+      }
+
+      await window.settingsBackupManager.init();
+      const result = await window.settingsBackupManager.backupKnowledgeBaseToGoogleDrive();
+
+      if (result.success) {
+        this.showToast(`${result.variableCount} variables backed up to Google Drive`, 'success');
+      } else {
+        throw new Error(result.message || 'Backup failed');
+      }
+    } catch (error) {
+      console.error('Backup knowledge base to Google Drive failed:', error);
+      this.showToast(`Failed to backup to Google Drive: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  /**
+   * Restore knowledge base from Google Drive
+   */
+  async restoreKnowledgeBaseFromGoogleDrive() {
+    try {
+      this.showLoading(true);
+
+      if (!window.settingsBackupManager) {
+        this.showToast('Settings backup manager not available', 'error');
+        return;
+      }
+
+      await window.settingsBackupManager.init();
+      const options = { merge: true, overwriteConflicts: false };
+      const result = await window.settingsBackupManager.restoreKnowledgeBaseFromGoogleDrive(options);
+
+      if (result.success) {
+        await this.loadKnowledgeBase(); // Refresh the knowledge base display
+        this.showToast(`${result.imported} variables restored from Google Drive`, 'success');
+      } else {
+        this.showToast(result.message || 'No backup found', 'info');
+      }
+    } catch (error) {
+      console.error('Restore knowledge base from Google Drive failed:', error);
+      this.showToast(`Failed to restore from Google Drive: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  /**
+   * Backup all settings to Google Drive
+   */
+  async backupAllSettingsToGoogleDrive() {
+    try {
+      this.showLoading(true);
+
+      if (!window.settingsBackupManager) {
+        this.showToast('Settings backup manager not available', 'error');
+        return;
+      }
+
+      await window.settingsBackupManager.init();
+      const result = await window.settingsBackupManager.backupAllSettingsToGoogleDrive();
+
+      if (result.success) {
+        this.showToast(`All settings backed up: ${result.promptCount} prompts, ${result.variableCount} variables`, 'success');
+      } else {
+        throw new Error(result.message || 'Backup failed');
+      }
+    } catch (error) {
+      console.error('Backup all settings to Google Drive failed:', error);
+      this.showToast(`Failed to backup to Google Drive: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  /**
+   * Restore all settings from Google Drive
+   */
+  async restoreAllSettingsFromGoogleDrive() {
+    try {
+      this.showLoading(true);
+
+      if (!window.settingsBackupManager) {
+        this.showToast('Settings backup manager not available', 'error');
+        return;
+      }
+
+      await window.settingsBackupManager.init();
+      const options = { merge: true, overwriteConflicts: false };
+      const result = await window.settingsBackupManager.autoSyncOnAuthentication(options);
+
+      if (result.success) {
+        // Refresh all displays
+        await this.loadPrompts();
+        await this.loadKnowledgeBase();
+
+        const messages = [];
+        if (result.customPrompts?.success && result.customPrompts.imported > 0) {
+          messages.push(`${result.customPrompts.imported} prompts`);
+        }
+        if (result.knowledgeBase?.success && result.knowledgeBase.imported > 0) {
+          messages.push(`${result.knowledgeBase.imported} variables`);
+        }
+
+        if (messages.length > 0) {
+          this.showToast(`Restored from Google Drive: ${messages.join(', ')}`, 'success');
+        } else {
+          this.showToast('No backups found to restore', 'info');
+        }
+      } else {
+        this.showToast('No backups found to restore', 'info');
+      }
+    } catch (error) {
+      console.error('Restore all settings from Google Drive failed:', error);
+      this.showToast(`Failed to restore from Google Drive: ${error.message}`, 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  /**
+   * Read file content as text
+   */
+  readFileContent(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsText(file);
+    });
+  }
+
   // Knowledge Base Files Methods
   async checkGoogleAuth() {
     try {
@@ -3906,6 +4482,21 @@ class PopupManager {
     throw new Error('File processing timeout');
   }
 
+  async loadKnowledgeBaseFilesWithAuthCheck() {
+    try {
+      const authResult = await this.checkGoogleAuth();
+      if (authResult.success) {
+        await this.loadKnowledgeBaseFiles();
+      } else {
+        // Show authentication prompt instead of error
+        this.displayKnowledgeBaseFilesError('Please sign in with Google to view files');
+      }
+    } catch (error) {
+      console.error('aiFiverr Popup: Failed to load knowledge base files with auth check:', error);
+      this.displayKnowledgeBaseFilesError('Failed to load files. Please try again.');
+    }
+  }
+
   async loadKnowledgeBaseFiles() {
     try {
       // Only log if debugging is enabled
@@ -3913,12 +4504,8 @@ class PopupManager {
         console.log('aiFiverr Popup: Loading knowledge base files...');
       }
 
-      const authResult = await this.checkGoogleAuth();
-
-      if (!authResult.success) {
-        this.displayKnowledgeBaseFilesError('Please sign in with Google to view files');
-        return;
-      }
+      // Note: This method should only be called after authentication is confirmed
+      // Use loadKnowledgeBaseFilesWithAuthCheck() for automatic auth checking
 
       // Get files from Google Drive
       console.log('aiFiverr Popup: Getting Drive files...');
@@ -3938,7 +4525,14 @@ class PopupManager {
       this.updateKnowledgeBaseStats(allFiles);
 
     } catch (error) {
-      console.error('aiFiverr Popup: Failed to load knowledge base files:', error);
+      // Reduce console spam for authentication errors on fresh installs
+      if (error.message.includes('Authentication required')) {
+        if (window.aiFiverrDebug) {
+          console.log('aiFiverr Popup: Authentication required for knowledge base files');
+        }
+      } else {
+        console.error('aiFiverr Popup: Failed to load knowledge base files:', error);
+      }
       this.displayKnowledgeBaseFilesError(error.message);
     }
   }

@@ -294,6 +294,43 @@
               <div class="kb-variables-list" id="knowledgeBaseList">
                 <!-- Variables will be populated here -->
               </div>
+
+              <!-- Variables Backup/Sync Controls -->
+              <div class="variables-backup-controls">
+                <div class="backup-controls-header">
+                  <h5>Variables Backup & Sync</h5>
+                  <p class="backup-description">Export your knowledge base variables locally or sync with Google Drive</p>
+                </div>
+
+                <div class="backup-controls-actions">
+                  <!-- Local Export/Import -->
+                  <div class="backup-group">
+                    <label class="backup-group-label">Local Backup</label>
+                    <div class="backup-buttons">
+                      <div class="export-section">
+                        <select id="variablesExportFormat" class="export-format-select">
+                          <option value="json">JSON</option>
+                          <option value="markdown">Markdown</option>
+                        </select>
+                        <button class="btn-secondary" id="exportVariablesBtn">📥 Export</button>
+                      </div>
+                      <div class="import-section">
+                        <input type="file" id="variablesImportFile" accept=".json,.md" style="display: none;">
+                        <button class="btn-secondary" id="importVariablesBtn">📤 Import</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Google Drive Sync -->
+                  <div class="backup-group">
+                    <label class="backup-group-label">Google Drive Sync</label>
+                    <div class="backup-buttons">
+                      <button class="btn-primary" id="backupVariablesToGDriveBtn">☁️ Backup to Drive</button>
+                      <button class="btn-secondary" id="restoreVariablesFromGDriveBtn">🔄 Restore from Drive</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- Files Tab -->
@@ -475,6 +512,44 @@
                 <h4>Your Custom Prompts</h4>
                 <span class="custom-prompts-count" id="customPromptsCount">0 prompts</span>
               </div>
+
+              <!-- Prompts Backup/Sync Controls -->
+              <div class="prompts-backup-controls">
+                <div class="backup-controls-header">
+                  <h5>Backup & Sync</h5>
+                  <p class="backup-description">Export your custom prompts locally or sync with Google Drive</p>
+                </div>
+
+                <div class="backup-controls-actions">
+                  <!-- Local Export/Import -->
+                  <div class="backup-group">
+                    <label class="backup-group-label">Local Backup</label>
+                    <div class="backup-buttons">
+                      <div class="export-section">
+                        <select id="promptsExportFormat" class="export-format-select">
+                          <option value="json">JSON</option>
+                          <option value="markdown">Markdown</option>
+                        </select>
+                        <button class="btn-secondary" id="exportPromptsBtn">📥 Export</button>
+                      </div>
+                      <div class="import-section">
+                        <input type="file" id="promptsImportFile" accept=".json,.md" style="display: none;">
+                        <button class="btn-secondary" id="importPromptsBtn">📤 Import</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Google Drive Sync -->
+                  <div class="backup-group">
+                    <label class="backup-group-label">Google Drive Sync</label>
+                    <div class="backup-buttons">
+                      <button class="btn-primary" id="backupPromptsToGDriveBtn">☁️ Backup to Drive</button>
+                      <button class="btn-secondary" id="restorePromptsFromGDriveBtn">🔄 Restore from Drive</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div class="prompt-list" id="customPromptsList">
                 <!-- Custom prompts will be displayed here -->
               </div>
@@ -526,6 +601,73 @@
           <div class="global-save-section">
             <button class="btn-primary global-save-btn" id="globalSaveBtn">💾 Save All Settings</button>
             <p class="save-description">Save all API keys, preferences, and configurations</p>
+          </div>
+        </div>
+
+        <!-- Complete Settings Backup Section -->
+        <div class="settings-section">
+          <h3>Complete Settings Backup</h3>
+          <div class="complete-backup-container">
+            <div class="backup-info">
+              <p class="backup-description">
+                Export or import all your settings including custom prompts, knowledge base variables, and favorites in one operation.
+              </p>
+            </div>
+
+            <div class="complete-backup-actions">
+              <!-- Local Export/Import -->
+              <div class="backup-group">
+                <label class="backup-group-label">Local Complete Backup</label>
+                <div class="backup-buttons">
+                  <div class="export-section">
+                    <select id="completeExportFormat" class="export-format-select">
+                      <option value="json">JSON</option>
+                      <option value="markdown">Markdown</option>
+                    </select>
+                    <button class="btn-primary" id="exportAllSettingsBtn">📥 Export All Settings</button>
+                  </div>
+                  <div class="import-section">
+                    <input type="file" id="completeImportFile" accept=".json,.md" style="display: none;">
+                    <button class="btn-secondary" id="importAllSettingsBtn">📤 Import All Settings</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Google Drive Complete Sync -->
+              <div class="backup-group">
+                <label class="backup-group-label">Google Drive Complete Sync</label>
+                <div class="backup-buttons">
+                  <button class="btn-primary" id="backupAllToGDriveBtn">☁️ Backup All to Drive</button>
+                  <button class="btn-secondary" id="restoreAllFromGDriveBtn">🔄 Restore All from Drive</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Import Options -->
+            <div class="import-options" id="importOptions" style="display: none;">
+              <h5>Import Options</h5>
+              <div class="import-option">
+                <label>
+                  <input type="radio" name="importMode" value="replace" checked>
+                  Replace existing data
+                </label>
+                <small>Completely replace your current settings with imported data</small>
+              </div>
+              <div class="import-option">
+                <label>
+                  <input type="radio" name="importMode" value="merge">
+                  Merge with existing data
+                </label>
+                <small>Keep existing data and add new items from import</small>
+              </div>
+              <div class="import-option merge-only" style="display: none;">
+                <label>
+                  <input type="checkbox" id="overwriteConflicts">
+                  Overwrite conflicts
+                </label>
+                <small>Replace existing items with same names from import</small>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -662,6 +804,8 @@
   <!-- Toast Notifications -->
   <div class="toast-container" id="toastContainer"></div>
 
+  <script src="../content/utils/settings-backup.js"></script>
+  <script src="../content/utils/export-import.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -691,7 +691,15 @@ async function handleGetKnowledgeBaseFiles(sendResponse) {
     });
 
   } catch (error) {
-    console.error('❌ Firebase Background: Get knowledge base files error:', error);
+    // Reduce console spam for authentication errors on fresh installs
+    if (error.message.includes('Authentication required')) {
+      // Only log authentication errors if debugging is enabled
+      if (window.aiFiverrDebug) {
+        console.log('📁 Firebase Background: Authentication required for knowledge base files');
+      }
+    } else {
+      console.error('❌ Firebase Background: Get knowledge base files error:', error);
+    }
     sendResponse({ success: false, error: error.message });
   }
 }
