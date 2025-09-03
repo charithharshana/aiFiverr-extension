@@ -1319,12 +1319,42 @@ class StreamingChatbox {
     // Build complete conversation context
     const contents = [];
 
-    // Add conversation history
+    // Add conversation history with file validation
     for (const message of this.conversationHistory) {
-      contents.push({
+      const messageCopy = {
         role: message.role === 'model' ? 'model' : 'user',
-        parts: message.parts
-      });
+        parts: []
+      };
+
+      // Validate files in conversation history before adding to API request
+      for (const part of message.parts) {
+        if (part.fileData && part.fileData.fileUri) {
+          // Extract file info for validation
+          const fileId = part.fileData.fileUri.split('/').pop();
+          const fileForValidation = {
+            name: `conversation-file-${fileId}`,
+            geminiUri: part.fileData.fileUri,
+            mimeType: part.fileData.mimeType
+          };
+
+          // Validate this file
+          const validatedFiles = await this.validateFilesBeforeAPICall([fileForValidation]);
+
+          if (validatedFiles.length > 0) {
+            // File is valid, include it
+            messageCopy.parts.push(part);
+            console.log('✅ STREAMING CHATBOX: Including validated file from conversation history:', fileId);
+          } else {
+            // File is invalid/expired, skip it
+            console.warn('🗑️ STREAMING CHATBOX: Skipping expired file from conversation history:', fileId);
+          }
+        } else {
+          // Not a file part, include as-is
+          messageCopy.parts.push(part);
+        }
+      }
+
+      contents.push(messageCopy);
     }
 
     // NEW: Get files based on variable processor logic (manually attached + referenced files)
