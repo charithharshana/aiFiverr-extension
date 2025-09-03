@@ -832,13 +832,55 @@ class TextSelector {
         console.log('aiFiverr: Found universal chat attached files:', window.universalChat.attachedFiles.length, 'new files:', newFiles.length);
       }
 
-      console.log('aiFiverr: Total files for streaming chat context:', attachedFiles.length);
+      console.log('aiFiverr: Total files for streaming chat context (before validation):', attachedFiles.length);
+
+      // CRITICAL: Validate all files to remove stale/expired ones before returning
+      const validFiles = [];
+      for (const file of attachedFiles) {
+        try {
+          // Check if file has required properties
+          if (!file.geminiUri) {
+            console.warn('⚠️ aiFiverr: File missing geminiUri, skipping:', file.name);
+            continue;
+          }
+
+          // Check if file is expired using knowledge base manager if available
+          if (window.knowledgeBaseManager && typeof window.knowledgeBaseManager.isFileExpired === 'function') {
+            if (window.knowledgeBaseManager.isFileExpired(file)) {
+              console.warn('🗑️ aiFiverr: File expired, removing from manually attached files:', file.name, file.geminiUri);
+              continue;
+            }
+          }
+
+          // Basic URI format validation
+          if (!file.geminiUri.startsWith('https://generativelanguage.googleapis.com/v1beta/files/')) {
+            console.warn('⚠️ aiFiverr: Invalid geminiUri format, skipping:', file.name, file.geminiUri);
+            continue;
+          }
+
+          // Extract file ID for additional validation
+          const fileId = file.geminiUri.split('/').pop();
+          if (fileId === 'wrpdb7uq3ddk' || fileId.length < 10) {
+            console.warn('🚫 aiFiverr: Suspicious file ID detected, skipping:', fileId, file.name);
+            continue;
+          }
+
+          validFiles.push(file);
+          console.log('✅ aiFiverr: File validated for manual attachment:', file.name);
+
+        } catch (error) {
+          console.warn('⚠️ aiFiverr: Error validating manually attached file:', file.name, error);
+        }
+      }
+
+      console.log('📊 aiFiverr: File validation complete for manually attached files:', validFiles.length, 'of', attachedFiles.length, 'files are valid');
 
     } catch (error) {
       console.error('aiFiverr: Error getting manually attached files:', error);
+      return [];
     }
 
-    return attachedFiles;
+    return validFiles;
   }
 
   /**
@@ -3381,18 +3423,60 @@ class TextSelector {
       const userMessageParts = [{ text: userMessageForHistory }];
 
       // CRITICAL: Include the same files that were used in the original AI request
+      // BUT VALIDATE THEM FIRST to remove any stale/expired files
       if (this.lastKnowledgeBaseFiles && this.lastKnowledgeBaseFiles.length > 0) {
-        // Add files to the beginning of the parts array (same as streaming chat does)
+        console.log('🔍 aiFiverr: Validating', this.lastKnowledgeBaseFiles.length, 'files before adding to conversation history');
+
+        // Validate files to remove stale/expired ones
+        const validFiles = [];
         for (const file of this.lastKnowledgeBaseFiles) {
-          if (file.geminiUri) {
-            userMessageParts.unshift({
-              fileData: {
-                fileUri: file.geminiUri,
-                mimeType: file.mimeType || 'text/plain'
+          try {
+            // Check if file has required properties
+            if (!file.geminiUri) {
+              console.warn('⚠️ aiFiverr: File missing geminiUri, skipping:', file.name);
+              continue;
+            }
+
+            // Check if file is expired using knowledge base manager if available
+            if (window.knowledgeBaseManager && typeof window.knowledgeBaseManager.isFileExpired === 'function') {
+              if (window.knowledgeBaseManager.isFileExpired(file)) {
+                console.warn('🗑️ aiFiverr: File expired, removing from conversation history:', file.name, file.geminiUri);
+                continue;
               }
-            });
-            console.log('aiFiverr: Added original file to conversation history:', file.name);
+            }
+
+            // Basic URI format validation
+            if (!file.geminiUri.startsWith('https://generativelanguage.googleapis.com/v1beta/files/')) {
+              console.warn('⚠️ aiFiverr: Invalid geminiUri format, skipping:', file.name, file.geminiUri);
+              continue;
+            }
+
+            // Extract file ID for additional validation
+            const fileId = file.geminiUri.split('/').pop();
+            if (fileId === 'wrpdb7uq3ddk' || fileId.length < 10) {
+              console.warn('🚫 aiFiverr: Suspicious file ID detected, skipping:', fileId, file.name);
+              continue;
+            }
+
+            validFiles.push(file);
+            console.log('✅ aiFiverr: File validated for conversation history:', file.name);
+
+          } catch (error) {
+            console.warn('⚠️ aiFiverr: Error validating file for conversation history:', file.name, error);
           }
+        }
+
+        console.log('📊 aiFiverr: File validation complete:', validFiles.length, 'of', this.lastKnowledgeBaseFiles.length, 'files are valid');
+
+        // Add only valid files to the beginning of the parts array
+        for (const file of validFiles) {
+          userMessageParts.unshift({
+            fileData: {
+              fileUri: file.geminiUri,
+              mimeType: file.mimeType || 'text/plain'
+            }
+          });
+          console.log('✅ aiFiverr: Added validated file to conversation history:', file.name);
         }
       }
 
