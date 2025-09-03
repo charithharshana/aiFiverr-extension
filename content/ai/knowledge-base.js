@@ -102,10 +102,8 @@ class KnowledgeBaseManager {
 
         await syncPromise;
 
-        // Only log if debugging is enabled
-        if (window.aiFiverrDebug) {
-          console.log('aiFiverr KB: Background sync with Gemini Files and custom data completed');
-        }
+        // Log background sync completion
+        console.log('aiFiverr KB: Background sync with Gemini Files and custom data completed');
       } catch (error) {
         console.warn('aiFiverr KB: Background sync failed:', error.message);
         // Don't throw - this is background sync and shouldn't break the UI

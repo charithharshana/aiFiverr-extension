@@ -1075,6 +1075,19 @@ class PopupManager {
     }, 100); // Reduced delay to just remove loading state
   }
 
+  // Helper function to set element styles
+  async setElementStyles(element, styles) {
+    if (!element) return false;
+
+    try {
+      Object.assign(element.style, styles);
+      return true;
+    } catch (error) {
+      console.warn('Failed to set element styles:', error);
+      return false;
+    }
+  }
+
   // Display custom prompts in the simplified UI
   displayCustomPrompts(customPrompts) {
     const container = document.getElementById('customPromptsList');
@@ -1085,6 +1098,16 @@ class PopupManager {
     const promptCount = Object.keys(customPrompts).length;
     if (countElement) {
       countElement.textContent = `${promptCount} prompt${promptCount !== 1 ? 's' : ''}`;
+
+      // Apply UI update for custom prompt section title
+      const titleElement = countElement.previousElementSibling;
+      if (titleElement) {
+        this.setElementStyles(titleElement, {
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        });
+      }
     }
 
     if (promptCount === 0) {
@@ -1104,7 +1127,7 @@ class PopupManager {
         <div class="prompt-item ${isFavorite ? 'favorite' : ''}" data-key="${key}" data-type="custom">
           <div class="prompt-item-header">
             <div class="prompt-item-title">
-              <h4 class="prompt-item-name">${this.escapeHtml(prompt.name)}</h4>
+              <h4 class="prompt-item-name" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${this.escapeHtml(prompt.name)}</h4>
               <span class="prompt-item-key">${key}</span>
             </div>
             <div class="prompt-item-actions">
@@ -3985,16 +4008,32 @@ class PopupManager {
 
   async loadKnowledgeBaseFilesWithAuthCheck() {
     try {
-      const authResult = await this.checkGoogleAuth();
+      // Add timeout wrapper to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Knowledge base loading timeout')), 30000); // 30 second timeout
+      });
+
+      const authResult = await Promise.race([
+        this.checkGoogleAuth(),
+        timeoutPromise
+      ]);
+
       if (authResult.success) {
-        await this.loadKnowledgeBaseFiles();
+        await Promise.race([
+          this.loadKnowledgeBaseFiles(),
+          timeoutPromise
+        ]);
       } else {
         // Show authentication prompt instead of error
         this.displayKnowledgeBaseFilesError('Please sign in with Google to view files');
       }
     } catch (error) {
       console.error('aiFiverr Popup: Failed to load knowledge base files with auth check:', error);
-      this.displayKnowledgeBaseFilesError('Failed to load files. Please try again.');
+      if (error.message.includes('timeout')) {
+        this.displayKnowledgeBaseFilesError('Loading files is taking too long. Please try again.');
+      } else {
+        this.displayKnowledgeBaseFilesError('Failed to load files. Please try again.');
+      }
     }
   }
 
@@ -4190,10 +4229,8 @@ class PopupManager {
 
   async loadKnowledgeBaseFiles() {
     try {
-      // Only log if debugging is enabled
-      if (window.aiFiverrDebug) {
-        console.log('aiFiverr Popup: Loading knowledge base files...');
-      }
+      // Log knowledge base loading
+      console.log('aiFiverr Popup: Loading knowledge base files...');
 
       // Note: This method should only be called after authentication is confirmed
       // Use loadKnowledgeBaseFilesWithAuthCheck() for automatic auth checking
@@ -4218,9 +4255,7 @@ class PopupManager {
     } catch (error) {
       // Reduce console spam for authentication errors on fresh installs
       if (error.message.includes('Authentication required')) {
-        if (window.aiFiverrDebug) {
-          console.log('aiFiverr Popup: Authentication required for knowledge base files');
-        }
+        console.log('aiFiverr Popup: Authentication required for knowledge base files');
       } else {
         console.error('aiFiverr Popup: Failed to load knowledge base files:', error);
       }
@@ -4257,9 +4292,7 @@ class PopupManager {
           type: 'GET_GEMINI_FILES'
         }, (response) => {
           if (chrome.runtime.lastError) {
-            if (window.aiFiverrDebug) {
-              console.warn('aiFiverr Popup: Runtime error getting Gemini files:', chrome.runtime.lastError.message);
-            }
+            console.warn('aiFiverr Popup: Runtime error getting Gemini files:', chrome.runtime.lastError.message);
             resolve([]); // Gemini files are optional
           } else if (response && response.success) {
             resolve(response.data || []);
@@ -4268,9 +4301,7 @@ class PopupManager {
           }
         });
       } catch (error) {
-        if (window.aiFiverrDebug) {
-          console.error('aiFiverr Popup: Error sending message for Gemini files:', error);
-        }
+        console.error('aiFiverr Popup: Error sending message for Gemini files:', error);
         resolve([]); // Gemini files are optional
       }
     });
@@ -4999,9 +5030,15 @@ class PopupManager {
     const maxRetries = 2;
 
     return new Promise((resolve, reject) => {
+      // Add timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        reject(new Error('Knowledge base files request timeout'));
+      }, 20000); // 20 second timeout
+
       chrome.runtime.sendMessage({
         type: 'GET_DRIVE_FILES'
       }, (response) => {
+        clearTimeout(timeout);
         if (chrome.runtime.lastError) {
           const error = new Error(`Chrome runtime error: ${chrome.runtime.lastError.message}`);
           if (retryCount < maxRetries) {

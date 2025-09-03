@@ -161,24 +161,8 @@ class GeminiClient {
         }
       };
 
-      // DEBUG: Log the exact payload being sent to Gemini
-      console.log('🚨 aiFiverr Gemini: EXACT PAYLOAD BEING SENT:', JSON.stringify(payload, null, 2));
-
-      // Check if files are properly included
-      const hasFiles = payload.contents.some(content =>
-        content.parts && content.parts.some(part => part.fileData)
-      );
-      console.log('🚨 PAYLOAD HAS FILES:', hasFiles);
-
-      if (hasFiles) {
-        const fileParts = payload.contents.flatMap(content =>
-          content.parts.filter(part => part.fileData)
-        );
-        console.log('🚨 FILE PARTS IN PAYLOAD:', fileParts);
-      }
-
-      // COMPREHENSIVE PAYLOAD DEBUGGING - Log the entire payload being sent
-      console.log('🚨 REGULAR PAYLOAD DEBUG: Full payload being sent to Gemini API:', JSON.stringify(payload, null, 2));
+      // Log payload summary for debugging
+      console.log('aiFiverr Gemini: Sending request to API with', payload.contents.length, 'content parts');
 
       // FINAL SAFETY CHECK - Scan and fix any remaining application/octet-stream in payload
       const payloadStr = JSON.stringify(payload);

@@ -1331,6 +1331,9 @@ body {
   font-weight: 600;
   color: #2c3e50;
   margin: 0 0 4px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .prompt-item-preview {

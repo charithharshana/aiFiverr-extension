@@ -413,9 +413,7 @@ class SessionManager {
     try {
       // Check if storage manager is available and extension context is valid
       if (!window.storageManager) {
-        if (window.aiFiverrDebug) {
-          console.warn('aiFiverr: Storage manager not available for session cleanup');
-        }
+        console.warn('aiFiverr: Storage manager not available for session cleanup');
         return;
       }
 
@@ -425,13 +423,11 @@ class SessionManager {
       }
 
       const deletedCount = await storageManager.cleanupOldSessions();
-      if (deletedCount > 0 && window.aiFiverrDebug) {
+      if (deletedCount > 0) {
         console.log(`aiFiverr: Cleaned up ${deletedCount} old sessions`);
       }
     } catch (error) {
-      if (window.aiFiverrDebug) {
-        console.error('aiFiverr: Session cleanup error:', error);
-      }
+      console.error('aiFiverr: Session cleanup error:', error);
     }
   }
 }

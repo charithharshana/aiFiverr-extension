@@ -42,9 +42,7 @@ class StorageManager {
     // Only log context invalidation once to reduce console spam
     if (!isValid && this.contextInvalidated !== true) {
       this.contextInvalidated = true;
-      if (window.aiFiverrDebug) {
-        console.warn('aiFiverr: Extension context invalidated - storage operations will use cache only');
-      }
+      console.warn('aiFiverr: Extension context invalidated - storage operations will use cache only');
 
       // Notify other components about context invalidation (throttled)
       try {
@@ -59,9 +57,7 @@ class StorageManager {
     } else if (isValid && this.contextInvalidated === true) {
       // Context has been restored
       this.contextInvalidated = false;
-      if (window.aiFiverrDebug) {
-        console.log('aiFiverr: Extension context restored');
-      }
+      console.log('aiFiverr: Extension context restored');
     }
 
     return isValid;
