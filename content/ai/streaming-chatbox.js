@@ -1195,22 +1195,20 @@ class StreamingChatbox {
     // NEW: Get files based on variable processor logic (manually attached + referenced files)
     let knowledgeBaseFiles = [];
 
-    // CRITICAL FIX: Track all file IDs that will be in the final payload to prevent duplicates
-    const allPayloadFileIds = new Set();
-
-    // First, collect all file IDs that are already in conversation history
+    // Show files already in conversation history for debugging
+    const conversationFileIds = [];
     for (const message of contents) {
       if (message.parts) {
         message.parts.forEach(part => {
           if (part.fileData && part.fileData.fileUri) {
             const fileId = part.fileData.fileUri.split('/').pop();
-            allPayloadFileIds.add(fileId);
+            conversationFileIds.push(fileId);
           }
         });
       }
     }
 
-    console.log('🔍 STREAMING CHATBOX: Files already in conversation history:', Array.from(allPayloadFileIds));
+    console.log('🔍 STREAMING CHATBOX: Files already in conversation history:', conversationFileIds);
 
     // Show current blacklist status
     console.log('🔍 STREAMING CHATBOX: Blacklist system status:');
@@ -1231,25 +1229,21 @@ class StreamingChatbox {
         this.manuallyAttachedFiles.map(f => ({ name: f.name, fileId: f.geminiUri?.split('/').pop() }))
       );
 
-      // Filter out blacklisted files and duplicates before adding
+      // Filter out blacklisted files only (allow duplicates unless blacklisted)
       const validManualFiles = this.manuallyAttachedFiles.filter(file => {
         if (file.geminiUri) {
           const fileId = file.geminiUri.split('/').pop();
 
-          // Check blacklist
+          // Check blacklist - this is the ONLY reason to skip files
           if (this.blacklistedFileIds && this.blacklistedFileIds.has(fileId)) {
             console.warn('🚫 STREAMING CHATBOX: Skipping blacklisted manually attached file:', file.name, fileId);
             return false;
           }
 
-          // CRITICAL FIX: Check for duplicates against conversation history
-          if (allPayloadFileIds.has(fileId)) {
-            console.warn('🚫 STREAMING CHATBOX: Skipping duplicate manually attached file (already in conversation):', file.name, fileId);
-            return false;
-          }
-
-          // Add to tracking set
-          allPayloadFileIds.add(fileId);
+          // CRITICAL FIX: Don't prevent duplicates unless file is blacklisted
+          // Files can exist in both conversation history and new attachments
+          // The API will handle duplicates gracefully, but we need all valid files
+          console.log('✅ STREAMING CHATBOX: Including manually attached file:', file.name, fileId);
         }
         return true;
       });
@@ -1257,7 +1251,8 @@ class StreamingChatbox {
       knowledgeBaseFiles.push(...validManualFiles);
       console.log('🚨 STREAMING CHATBOX: Including manually attached files:', validManualFiles.length, 'of', this.manuallyAttachedFiles.length);
       if (validManualFiles.length !== this.manuallyAttachedFiles.length) {
-        console.warn('⚠️ STREAMING CHATBOX: Some manually attached files were filtered out by blacklist');
+        const filteredCount = this.manuallyAttachedFiles.length - validManualFiles.length;
+        console.warn(`⚠️ STREAMING CHATBOX: ${filteredCount} manually attached files were filtered out due to blacklisting`);
       }
     } else {
       console.log('🚨 STREAMING CHATBOX: No manually attached files to include');
@@ -1272,9 +1267,8 @@ class StreamingChatbox {
 
       let addedFromCurrentMessage = 0;
       let skippedBlacklisted = 0;
-      let skippedDuplicates = 0;
 
-      // Avoid duplicates and filter blacklisted files
+      // Filter blacklisted files only (allow duplicates unless blacklisted)
       for (const file of this.currentMessageFiles) {
         // Check if blacklisted
         if (file.geminiUri) {
@@ -1285,24 +1279,17 @@ class StreamingChatbox {
             continue;
           }
 
-          // CRITICAL FIX: Check for duplicates against all payload files
-          if (allPayloadFileIds.has(fileId)) {
-            console.warn('🚫 STREAMING CHATBOX: Skipping duplicate current message file (already in payload):', file.name, fileId);
-            skippedDuplicates++;
-            continue;
-          }
-
-          // Add to tracking set
-          allPayloadFileIds.add(fileId);
+          // CRITICAL FIX: Don't prevent duplicates unless blacklisted
+          // Allow files to exist in multiple places - API handles duplicates gracefully
+          console.log('✅ STREAMING CHATBOX: Including current message file:', file.name, fileId);
         }
 
-        // File passed all checks, add it
+        // File passed blacklist check, add it
         knowledgeBaseFiles.push(file);
-        console.log('✅ STREAMING CHATBOX: Added current message file:', file.name, file.geminiUri?.split('/').pop());
         addedFromCurrentMessage++;
       }
 
-      console.log(`🚨 STREAMING CHATBOX: Current message files summary: ${addedFromCurrentMessage} added, ${skippedBlacklisted} blacklisted, ${skippedDuplicates} duplicates`);
+      console.log(`🚨 STREAMING CHATBOX: Current message files summary: ${addedFromCurrentMessage} added, ${skippedBlacklisted} blacklisted`);
     }
 
     // REMOVED: No longer automatically include all knowledge base files
@@ -1339,24 +1326,17 @@ class StreamingChatbox {
       const lastUserMessage = contents[contents.length - 1];
       if (lastUserMessage.role === 'user') {
 
-        // CRITICAL FIX: Check if this message already has files to prevent duplicates
-        const existingFileIds = lastUserMessage.parts
-          .filter(part => part.fileData)
-          .map(part => part.fileData.fileUri.split('/').pop());
-
-        console.log('🔍 STREAMING CHATBOX: Last user message already has files:', existingFileIds);
-
+        // Add all knowledge base files to the last user message
+        // Don't prevent duplicates here - let the API handle them gracefully
         let addedNewFiles = 0;
-        let skippedDuplicateFiles = 0;
 
         for (const file of knowledgeBaseFiles) {
           if (file.geminiUri) {
             const fileId = file.geminiUri.split('/').pop();
 
-            // Skip if this file is already in the message
-            if (existingFileIds.includes(fileId)) {
-              console.log('⚠️ STREAMING CHATBOX: Skipping duplicate file in last message:', file.name, fileId);
-              skippedDuplicateFiles++;
+            // Only skip if file is blacklisted
+            if (this.blacklistedFileIds && this.blacklistedFileIds.has(fileId)) {
+              console.warn('🚫 STREAMING CHATBOX: Skipping blacklisted file in last message:', file.name, fileId);
               continue;
             }
 
@@ -1366,7 +1346,7 @@ class StreamingChatbox {
                 mimeType: file.mimeType || 'text/plain'
               }
             });
-            console.log('✅ STREAMING CHATBOX: Added new file to last message:', {
+            console.log('✅ STREAMING CHATBOX: Added file to last message:', {
               name: file.name,
               geminiUri: file.geminiUri,
               mimeType: file.mimeType,
@@ -1378,7 +1358,7 @@ class StreamingChatbox {
           }
         }
 
-        console.log(`🔍 STREAMING CHATBOX: File addition summary: ${addedNewFiles} new files added, ${skippedDuplicateFiles} duplicates skipped`);
+        console.log(`🔍 STREAMING CHATBOX: Added ${addedNewFiles} files to last message`);
       }
     }
 
