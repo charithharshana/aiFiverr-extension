@@ -668,6 +668,13 @@ class PopupManager {
         document.getElementById('autoSave').checked = settings.autoSave !== false;
         document.getElementById('notifications').checked = settings.notifications !== false;
         document.getElementById('maxContextLength').value = settings.maxContextLength || 1048576;
+
+        // Load grounding settings
+        document.getElementById('googleSearchGrounding').checked = settings.googleSearchGrounding?.enabled === true;
+        document.getElementById('googleSearchGroundingDefault').checked = settings.googleSearchGrounding?.defaultEnabled === true;
+        document.getElementById('urlContextExtraction').checked = settings.urlContextExtraction?.enabled === true;
+        document.getElementById('urlContextExtractionDefault').checked = settings.urlContextExtraction?.defaultEnabled === true;
+        document.getElementById('urlAutoExtract').checked = settings.urlContextExtraction?.autoExtract !== false;
       }
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -1870,6 +1877,13 @@ class PopupManager {
       const keyRotationEl = document.getElementById('keyRotation');
       const maxContextLengthEl = document.getElementById('maxContextLength');
 
+      // Grounding settings elements
+      const googleSearchGroundingEl = document.getElementById('googleSearchGrounding');
+      const googleSearchGroundingDefaultEl = document.getElementById('googleSearchGroundingDefault');
+      const urlContextExtractionEl = document.getElementById('urlContextExtraction');
+      const urlContextExtractionDefaultEl = document.getElementById('urlContextExtractionDefault');
+      const urlAutoExtractEl = document.getElementById('urlAutoExtract');
+
       // Only update settings if elements exist
       if (defaultModelEl) {
         settings.defaultModel = defaultModelEl.value;
@@ -1880,6 +1894,16 @@ class PopupManager {
       if (notificationsEl) settings.notifications = notificationsEl.checked;
       if (keyRotationEl) settings.keyRotation = keyRotationEl.checked;
       if (maxContextLengthEl) settings.maxContextLength = parseInt(maxContextLengthEl.value) || 1048576;
+
+      // Save grounding settings
+      if (!settings.googleSearchGrounding) settings.googleSearchGrounding = {};
+      if (!settings.urlContextExtraction) settings.urlContextExtraction = {};
+
+      if (googleSearchGroundingEl) settings.googleSearchGrounding.enabled = googleSearchGroundingEl.checked;
+      if (googleSearchGroundingDefaultEl) settings.googleSearchGrounding.defaultEnabled = googleSearchGroundingDefaultEl.checked;
+      if (urlContextExtractionEl) settings.urlContextExtraction.enabled = urlContextExtractionEl.checked;
+      if (urlContextExtractionDefaultEl) settings.urlContextExtraction.defaultEnabled = urlContextExtractionDefaultEl.checked;
+      if (urlAutoExtractEl) settings.urlContextExtraction.autoExtract = urlAutoExtractEl.checked;
 
       console.log('Saving preferences:', settings);
 

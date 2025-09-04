@@ -289,6 +289,17 @@ class FirebaseDatabaseService {
       maxSessions: 50,
       conversationContext: true,
 
+      // Google Search grounding and URL context settings
+      googleSearchGrounding: {
+        enabled: false,
+        defaultEnabled: false
+      },
+      urlContextExtraction: {
+        enabled: false,
+        defaultEnabled: false,
+        autoExtract: true
+      },
+
       // User Profile Extensions
       bio: '', // User's professional bio/description
       language: 'en-US', // User's preferred language

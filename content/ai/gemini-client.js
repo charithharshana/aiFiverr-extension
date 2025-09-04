@@ -79,6 +79,18 @@ class GeminiClient {
         role: "user"
       }];
 
+      // Process URL context extraction if enabled
+      let processedPrompt = prompt;
+      if (options.urlContextExtraction && window.urlContextExtractor) {
+        try {
+          const urlResult = await window.urlContextExtractor.processText(prompt);
+          processedPrompt = urlResult.enhancedText;
+          console.log('aiFiverr Gemini: URL context extraction applied');
+        } catch (error) {
+          console.warn('aiFiverr Gemini: URL context extraction failed:', error);
+        }
+      }
+
       // Add knowledge base files first if provided
       if (options.knowledgeBaseFiles && options.knowledgeBaseFiles.length > 0) {
         let validFilesCount = 0;
@@ -147,9 +159,9 @@ class GeminiClient {
         console.log('aiFiverr Gemini: Added', validFilesCount, 'valid knowledge base files (', options.knowledgeBaseFiles.length, 'total)');
       }
 
-      // Add text prompt
+      // Add text prompt (use processed prompt with URL context if available)
       contents[0].parts.push({
-        text: prompt
+        text: processedPrompt
       });
 
       const payload = {
@@ -160,6 +172,27 @@ class GeminiClient {
           candidateCount: 1
         }
       };
+
+      // Add tools for grounding and URL context if enabled
+      const tools = [];
+
+      // Add Google Search grounding tool if enabled
+      if (options.googleSearchGrounding) {
+        tools.push({ googleSearch: {} });
+        console.log('aiFiverr Gemini: Google Search grounding enabled');
+      }
+
+      // Add URL context tool if enabled
+      if (options.urlContextTool) {
+        tools.push({ urlContext: {} });
+        console.log('aiFiverr Gemini: URL context tool enabled');
+      }
+
+      // Add tools to payload if any are enabled
+      if (tools.length > 0) {
+        payload.tools = tools;
+        console.log('aiFiverr Gemini: Added tools to payload:', tools.length);
+      }
 
       // Log payload summary for debugging
       console.log('aiFiverr Gemini: Sending request to API with', payload.contents.length, 'content parts');
@@ -229,9 +262,17 @@ class GeminiClient {
       }
 
       const text = result.candidates[0].content.parts[0].text;
+
+      // Extract grounding metadata if available
+      const groundingMetadata = result.candidates[0].groundingMetadata;
+      const urlContextMetadata = result.candidates[0].urlContextMetadata;
+
       return {
         text: text,
-        response: text // For compatibility
+        response: text, // For compatibility
+        groundingMetadata,
+        urlContextMetadata,
+        fullResult: result // Include full result for advanced processing
       };
 
     } catch (error) {
@@ -342,8 +383,20 @@ class GeminiClient {
         console.log('aiFiverr Gemini: Added', validFilesCount, 'valid knowledge base files to chat (', options.knowledgeBaseFiles.length, 'total)');
       }
 
-      // Add text message
-      currentMessageParts.push({ text: message });
+      // Process URL context extraction if enabled
+      let processedMessage = message;
+      if (options.urlContextExtraction && window.urlContextExtractor) {
+        try {
+          const urlResult = await window.urlContextExtractor.processText(message);
+          processedMessage = urlResult.enhancedText;
+          console.log('aiFiverr Gemini Chat: URL context extraction applied');
+        } catch (error) {
+          console.warn('aiFiverr Gemini Chat: URL context extraction failed:', error);
+        }
+      }
+
+      // Add text message (use processed message with URL context if available)
+      currentMessageParts.push({ text: processedMessage });
 
       contents.push({
         role: 'user',
@@ -358,6 +411,27 @@ class GeminiClient {
           candidateCount: 1
         }
       };
+
+      // Add tools for grounding and URL context if enabled
+      const tools = [];
+
+      // Add Google Search grounding tool if enabled
+      if (options.googleSearchGrounding) {
+        tools.push({ googleSearch: {} });
+        console.log('aiFiverr Gemini Chat: Google Search grounding enabled');
+      }
+
+      // Add URL context tool if enabled
+      if (options.urlContextTool) {
+        tools.push({ urlContext: {} });
+        console.log('aiFiverr Gemini Chat: URL context tool enabled');
+      }
+
+      // Add tools to payload if any are enabled
+      if (tools.length > 0) {
+        payload.tools = tools;
+        console.log('aiFiverr Gemini Chat: Added tools to payload:', tools.length);
+      }
 
       // COMPREHENSIVE PAYLOAD DEBUGGING - Log the entire payload being sent
       console.log('🚨 STREAMING PAYLOAD DEBUG: Full payload being sent to Gemini API:', JSON.stringify(payload, null, 2));
@@ -413,6 +487,10 @@ class GeminiClient {
 
       const responseText = result.candidates[0].content.parts[0].text;
 
+      // Extract grounding metadata if available
+      const groundingMetadata = result.candidates[0].groundingMetadata;
+      const urlContextMetadata = result.candidates[0].urlContextMetadata;
+
       // Add to session if provided
       if (session && session.addMessage) {
         session.addMessage('user', message);
@@ -421,7 +499,10 @@ class GeminiClient {
 
       return {
         response: responseText,
-        text: responseText // For compatibility
+        text: responseText, // For compatibility
+        groundingMetadata,
+        urlContextMetadata,
+        fullResult: result // Include full result for advanced processing
       };
 
     } catch (error) {

@@ -1144,6 +1144,10 @@ class TextSelector {
       const replySection = this.createReplySection();
       this.contextMenu.appendChild(replySection);
 
+      // Add grounding controls section
+      const groundingSection = await this.createGroundingControlsSection();
+      this.contextMenu.appendChild(groundingSection);
+
       // Add separator
       const separator = document.createElement('div');
       separator.style.cssText = 'height: 1px; background: #e5e7eb; margin: 8px 0;';
@@ -1193,7 +1197,7 @@ class TextSelector {
     leftSection.style.cssText = 'display: flex; align-items: center; justify-content: flex-start;';
 
     const mainSpan = document.createElement('span');
-    mainSpan.textContent = 'Reply Text ({reply} variable)';
+    mainSpan.textContent = 'Reply Text ({reply})';
 
     const optionalSpan = document.createElement('span');
     optionalSpan.textContent = 'Optional';
@@ -1312,6 +1316,154 @@ class TextSelector {
     section.appendChild(textarea);
 
     return section;
+  }
+
+  /**
+   * Create grounding controls section
+   */
+  async createGroundingControlsSection() {
+    const section = document.createElement('div');
+    section.style.cssText = 'padding: 12px 16px; background: #f8f9fa; border-top: 1px solid #e5e7eb;';
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'font-weight: 600; font-size: 12px; color: #374151; margin-bottom: 8px;';
+    header.textContent = 'AI Enhancement Tools';
+
+    // Controls container
+    const controlsContainer = document.createElement('div');
+    controlsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
+
+    // Get current settings
+    const settings = await this.getSettings();
+    const googleSearchDefault = settings?.googleSearchGrounding?.defaultEnabled || false;
+    const urlContextDefault = settings?.urlContextExtraction?.defaultEnabled || false;
+
+    // Google Search grounding control
+    const googleSearchControl = this.createToggleControl(
+      'googleSearchGrounding',
+      'Google Search grounding',
+      'Enable real-time web search for accurate, up-to-date information',
+      googleSearchDefault
+    );
+
+    // URL context extraction control
+    const urlContextControl = this.createToggleControl(
+      'urlContextExtraction',
+      'URL context extraction',
+      'Automatically extract and include content from URLs in text',
+      urlContextDefault
+    );
+
+    controlsContainer.appendChild(googleSearchControl);
+    controlsContainer.appendChild(urlContextControl);
+
+    section.appendChild(header);
+    section.appendChild(controlsContainer);
+
+    return section;
+  }
+
+  /**
+   * Create a toggle control (checkbox)
+   */
+  createToggleControl(id, label, description, defaultChecked = false) {
+    const container = document.createElement('div');
+    container.style.cssText = 'display: flex; align-items: flex-start; gap: 8px;';
+
+    // Checkbox
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = `aifiverr-${id}`;
+    checkbox.checked = defaultChecked;
+    checkbox.style.cssText = `
+      margin: 0;
+      margin-top: 2px;
+      cursor: pointer;
+      accent-color: #10b981;
+    `;
+
+    // Label and description container
+    const labelContainer = document.createElement('div');
+    labelContainer.style.cssText = 'flex: 1;';
+
+    const labelElement = document.createElement('label');
+    labelElement.htmlFor = checkbox.id;
+    labelElement.textContent = label;
+    labelElement.style.cssText = `
+      font-size: 12px;
+      font-weight: 500;
+      color: #374151;
+      cursor: pointer;
+      display: block;
+      margin-bottom: 2px;
+    `;
+
+    const descriptionElement = document.createElement('div');
+    descriptionElement.textContent = description;
+    descriptionElement.style.cssText = `
+      font-size: 10px;
+      color: #6b7280;
+      line-height: 1.3;
+    `;
+
+    labelContainer.appendChild(labelElement);
+    labelContainer.appendChild(descriptionElement);
+
+    container.appendChild(checkbox);
+    container.appendChild(labelContainer);
+
+    // Prevent dropdown from closing when interacting with controls
+    container.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.isInteractingWithUI = true;
+    });
+
+    checkbox.addEventListener('change', (e) => {
+      e.stopPropagation();
+      console.log(`aiFiverr: ${id} toggled:`, e.target.checked);
+    });
+
+    return container;
+  }
+
+  /**
+   * Get settings from storage
+   */
+  async getSettings() {
+    try {
+      if (window.storageManager) {
+        return await window.storageManager.getSettings();
+      }
+      // Fallback to direct storage access
+      const result = await chrome.storage.local.get('settings');
+      return result.settings || {};
+    } catch (error) {
+      console.error('aiFiverr: Error getting settings:', error);
+      return {};
+    }
+  }
+
+  /**
+   * Get grounding options from UI controls
+   */
+  getGroundingOptions() {
+    const options = {};
+
+    // Check Google Search grounding checkbox
+    const googleSearchCheckbox = document.getElementById('aifiverr-googleSearchGrounding');
+    if (googleSearchCheckbox && googleSearchCheckbox.checked) {
+      options.googleSearchGrounding = true;
+    }
+
+    // Check URL context extraction checkbox
+    const urlContextCheckbox = document.getElementById('aifiverr-urlContextExtraction');
+    if (urlContextCheckbox && urlContextCheckbox.checked) {
+      options.urlContextExtraction = true;
+      options.urlContextTool = true; // Enable the URL context tool in Gemini API
+    }
+
+    return options;
   }
 
   /**
@@ -1776,15 +1928,32 @@ class TextSelector {
       this.lastUsedPrompt = finalPrompt;
       console.log('aiFiverr: Stored final prompt for streaming chat context:', finalPrompt.substring(0, 100) + '...');
 
+      // Get grounding settings from UI controls
+      const groundingOptions = this.getGroundingOptions();
+      console.log('aiFiverr: Using grounding options:', groundingOptions);
+
       let response;
       try {
-        response = await window.geminiClient.generateChatReply(session, finalPrompt, { knowledgeBaseFiles });
+        const apiOptions = {
+          knowledgeBaseFiles,
+          ...groundingOptions
+        };
+
+        response = await window.geminiClient.generateChatReply(session, finalPrompt, apiOptions);
 
         if (!response || !response.response) {
           throw new Error('Empty response from AI service');
         }
 
         console.log('aiFiverr: Got AI response:', response.response.substring(0, 100) + '...');
+
+        // Log grounding metadata if available
+        if (response.groundingMetadata) {
+          console.log('aiFiverr: Response includes grounding metadata');
+        }
+        if (response.urlContextMetadata) {
+          console.log('aiFiverr: Response includes URL context metadata');
+        }
       } catch (aiError) {
         console.error('aiFiverr: Error generating AI response:', aiError);
         throw new Error(`AI service error: ${aiError.message}`);
