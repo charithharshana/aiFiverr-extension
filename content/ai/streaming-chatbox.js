@@ -757,7 +757,7 @@ class StreamingChatbox {
   async addToSuspiciousFilesList(fileId) {
     try {
       if (!this.suspiciousFileIds) {
-        this.suspiciousFileIds = new Set(['wrpdb7uq3ddk', '46vm361k1btt']);
+        this.suspiciousFileIds = new Set(['wrpdb7uq3ddk']); // Only confirmed problematic files
       }
 
       this.suspiciousFileIds.add(fileId);
@@ -855,7 +855,7 @@ class StreamingChatbox {
 
     // Initialize suspicious files list with only truly problematic files
     if (!this.suspiciousFileIds) {
-      this.suspiciousFileIds = new Set(['wrpdb7uq3ddk']); // Only keep confirmed problematic files
+      this.suspiciousFileIds = new Set(['wrpdb7uq3ddk']); // Only confirmed problematic files
     }
 
     for (const file of files) {
@@ -890,12 +890,13 @@ class StreamingChatbox {
           }
         }
 
-        // SIMPLE APPROACH: Block known problematic files, include everything else
-        const fileId = file.geminiUri.split('/').pop();
-        if (fileId === '46vm361k1btt') {
-          console.warn('🚫 StreamingChatbox: Skipping known problematic file:', file.name, 'ID:', fileId);
-          console.warn('🚫 This file has been confirmed to cause 403 permission errors');
-          continue; // Skip this file completely
+        // Check for truly suspicious file IDs (only confirmed problematic ones)
+        if (file.geminiUri) {
+          const fileId = file.geminiUri.split('/').pop();
+          if (this.suspiciousFileIds.has(fileId)) {
+            console.warn('🚨 StreamingChatbox: Skipping confirmed problematic file ID:', fileId, 'from file:', file.name);
+            continue;
+          }
         }
 
         validFiles.push(file);
