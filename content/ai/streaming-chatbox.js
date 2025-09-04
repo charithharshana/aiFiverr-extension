@@ -1196,10 +1196,15 @@ class StreamingChatbox {
     let knowledgeBaseFiles = [];
 
     // Show current blacklist status
+    console.log('🔍 STREAMING CHATBOX: Blacklist system status:');
+    console.log('  - blacklistedFileIds exists:', !!this.blacklistedFileIds);
+    console.log('  - blacklistedFileIds type:', typeof this.blacklistedFileIds);
+    console.log('  - blacklistedFileIds size:', this.blacklistedFileIds ? this.blacklistedFileIds.size : 'N/A');
+
     if (this.blacklistedFileIds && this.blacklistedFileIds.size > 0) {
       console.log('🚫 STREAMING CHATBOX: Current blacklist before file processing:', Array.from(this.blacklistedFileIds));
     } else {
-      console.log('🔍 STREAMING CHATBOX: No files currently blacklisted');
+      console.log('🔍 STREAMING CHATBOX: No files currently blacklisted (blacklist is empty, not missing)');
     }
 
     // Priority 1: Manually attached files (always include)
@@ -1303,24 +1308,47 @@ class StreamingChatbox {
     if (knowledgeBaseFiles.length > 0 && contents.length > 0) {
       const lastUserMessage = contents[contents.length - 1];
       if (lastUserMessage.role === 'user') {
+
+        // CRITICAL FIX: Check if this message already has files to prevent duplicates
+        const existingFileIds = lastUserMessage.parts
+          .filter(part => part.fileData)
+          .map(part => part.fileData.fileUri.split('/').pop());
+
+        console.log('🔍 STREAMING CHATBOX: Last user message already has files:', existingFileIds);
+
+        let addedNewFiles = 0;
+        let skippedDuplicateFiles = 0;
+
         for (const file of knowledgeBaseFiles) {
           if (file.geminiUri) {
+            const fileId = file.geminiUri.split('/').pop();
+
+            // Skip if this file is already in the message
+            if (existingFileIds.includes(fileId)) {
+              console.log('⚠️ STREAMING CHATBOX: Skipping duplicate file in last message:', file.name, fileId);
+              skippedDuplicateFiles++;
+              continue;
+            }
+
             lastUserMessage.parts.unshift({
               fileData: {
                 fileUri: file.geminiUri,
                 mimeType: file.mimeType || 'text/plain'
               }
             });
-            console.log('aiFiverr StreamingChatbox: Added validated file to message:', {
+            console.log('✅ STREAMING CHATBOX: Added new file to last message:', {
               name: file.name,
               geminiUri: file.geminiUri,
               mimeType: file.mimeType,
-              fileId: file.geminiUri.split('/').pop(),
+              fileId: fileId,
               size: file.size || 'unknown',
               lastModified: file.lastModified || 'unknown'
             });
+            addedNewFiles++;
           }
         }
+
+        console.log(`🔍 STREAMING CHATBOX: File addition summary: ${addedNewFiles} new files added, ${skippedDuplicateFiles} duplicates skipped`);
       }
     }
 
@@ -1441,9 +1469,22 @@ class StreamingChatbox {
         console.error('🚨 STREAMING CHATBOX: FILE ACCESS ERROR DETECTED:', fileId);
         console.error('🔧 SOLUTION: Attempting to continue without this specific file...');
 
+        // Debug blacklist before removal
+        console.log('🔍 STREAMING CHATBOX: Blacklist before file removal:');
+        console.log('  - blacklistedFileIds exists:', !!this.blacklistedFileIds);
+        console.log('  - blacklistedFileIds size:', this.blacklistedFileIds ? this.blacklistedFileIds.size : 'N/A');
+        console.log('  - current blacklist:', this.blacklistedFileIds ? Array.from(this.blacklistedFileIds) : 'N/A');
+
         // Try to remove just this specific file and continue
         console.log('🧹 STREAMING CHATBOX: Removing problematic file and retrying:', fileId);
-        await this.removeSpecificFileFromCurrentRequest(fileId);
+        const removalSuccess = await this.removeSpecificFileFromCurrentRequest(fileId);
+
+        // Debug blacklist after removal
+        console.log('🔍 STREAMING CHATBOX: Blacklist after file removal:');
+        console.log('  - removal success:', removalSuccess);
+        console.log('  - blacklistedFileIds size:', this.blacklistedFileIds ? this.blacklistedFileIds.size : 'N/A');
+        console.log('  - current blacklist:', this.blacklistedFileIds ? Array.from(this.blacklistedFileIds) : 'N/A');
+        console.log('  - file in blacklist:', this.blacklistedFileIds ? this.blacklistedFileIds.has(fileId) : 'N/A');
 
         if (retryCount < 3) {
           console.log(`🔄 STREAMING CHATBOX: Retrying without problematic file (attempt ${retryCount + 1}/3)...`);
@@ -2672,6 +2713,12 @@ class StreamingChatbox {
    * Filters out expired, invalid, or problematic files
    */
   async validateFilesBeforeAPICall(files) {
+    // CRITICAL FIX: Ensure blacklist is properly initialized
+    if (!this.blacklistedFileIds || !(this.blacklistedFileIds instanceof Set)) {
+      console.warn('⚠️ STREAMING CHATBOX: Blacklist not properly initialized in validation, creating new Set');
+      this.blacklistedFileIds = new Set();
+    }
+
     const validFiles = [];
 
     for (const file of files) {
@@ -2729,6 +2776,12 @@ class StreamingChatbox {
    */
   async removeSpecificFileFromCurrentRequest(fileId) {
     console.log('🗑️ STREAMING CHATBOX: Removing specific file from current request:', fileId);
+
+    // CRITICAL FIX: Ensure blacklist is properly initialized
+    if (!this.blacklistedFileIds || !(this.blacklistedFileIds instanceof Set)) {
+      console.warn('⚠️ STREAMING CHATBOX: Blacklist not properly initialized, creating new Set');
+      this.blacklistedFileIds = new Set();
+    }
 
     let removedCount = 0;
 
