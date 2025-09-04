@@ -97,15 +97,19 @@ class GeminiClient {
         console.log('🔍 GEMINI CLIENT: Checking', options.knowledgeBaseFiles.length, 'knowledge base files for expiration');
 
         for (const file of options.knowledgeBaseFiles) {
-          // Enhanced file expiration logging
+          // Enhanced file expiration logging with multiple timestamp field support
           if (file.geminiUri) {
             const isExpired = this.isFileExpired(file);
-            const createTime = file.createTime ? new Date(file.createTime) : null;
+
+            // Check all possible timestamp fields
+            const createTimeRaw = file.createTime || file.geminiCreateTime || file.geminiUploadTime || file.uploadTimestamp;
+            const createTime = createTimeRaw ? (typeof createTimeRaw === 'number' ? new Date(createTimeRaw) : new Date(createTimeRaw)) : null;
             const hoursSinceCreation = createTime ? (Date.now() - createTime.getTime()) / (1000 * 60 * 60) : 'unknown';
 
             console.log(`🔍 File: ${file.name}`, {
               geminiUri: file.geminiUri.substring(0, 50) + '...',
               createTime: createTime?.toISOString(),
+              createTimeSource: file.createTime ? 'createTime' : file.geminiCreateTime ? 'geminiCreateTime' : file.geminiUploadTime ? 'geminiUploadTime' : file.uploadTimestamp ? 'uploadTimestamp' : 'none',
               hoursSinceCreation: typeof hoursSinceCreation === 'number' ? hoursSinceCreation.toFixed(1) : hoursSinceCreation,
               isExpired,
               status: isExpired ? '❌ EXPIRED' : '✅ VALID'
@@ -352,15 +356,19 @@ class GeminiClient {
         console.log('🔍 GEMINI CHAT: Checking', options.knowledgeBaseFiles.length, 'knowledge base files for expiration');
 
         for (const file of options.knowledgeBaseFiles) {
-          // Enhanced file expiration logging for chat
+          // Enhanced file expiration logging for chat with multiple timestamp field support
           if (file.geminiUri) {
             const isExpired = this.isFileExpired(file);
-            const createTime = file.createTime ? new Date(file.createTime) : null;
+
+            // Check all possible timestamp fields
+            const createTimeRaw = file.createTime || file.geminiCreateTime || file.geminiUploadTime || file.uploadTimestamp;
+            const createTime = createTimeRaw ? (typeof createTimeRaw === 'number' ? new Date(createTimeRaw) : new Date(createTimeRaw)) : null;
             const hoursSinceCreation = createTime ? (Date.now() - createTime.getTime()) / (1000 * 60 * 60) : 'unknown';
 
             console.log(`🔍 Chat File: ${file.name}`, {
               geminiUri: file.geminiUri.substring(0, 50) + '...',
               createTime: createTime?.toISOString(),
+              createTimeSource: file.createTime ? 'createTime' : file.geminiCreateTime ? 'geminiCreateTime' : file.geminiUploadTime ? 'geminiUploadTime' : file.uploadTimestamp ? 'uploadTimestamp' : 'none',
               hoursSinceCreation: typeof hoursSinceCreation === 'number' ? hoursSinceCreation.toFixed(1) : hoursSinceCreation,
               isExpired,
               status: isExpired ? '❌ EXPIRED' : '✅ VALID'
@@ -425,11 +433,13 @@ class GeminiClient {
             currentMessageParts.push(fileDataPart);
             validFilesCount++;
           } else if (file.geminiUri && this.isFileExpired(file)) {
-            const createTime = file.createTime ? new Date(file.createTime) : null;
+            const createTimeRaw = file.createTime || file.geminiCreateTime || file.geminiUploadTime || file.uploadTimestamp;
+            const createTime = createTimeRaw ? (typeof createTimeRaw === 'number' ? new Date(createTimeRaw) : new Date(createTimeRaw)) : null;
             const hoursSinceCreation = createTime ? (Date.now() - createTime.getTime()) / (1000 * 60 * 60) : 'unknown';
             console.warn('🚨 aiFiverr Gemini: Skipping expired file:', {
               name: file.name,
               createTime: createTime?.toISOString(),
+              createTimeSource: file.createTime ? 'createTime' : file.geminiCreateTime ? 'geminiCreateTime' : file.geminiUploadTime ? 'geminiUploadTime' : file.uploadTimestamp ? 'uploadTimestamp' : 'none',
               hoursSinceCreation: typeof hoursSinceCreation === 'number' ? hoursSinceCreation.toFixed(1) + ' hours' : hoursSinceCreation,
               geminiUri: file.geminiUri.substring(0, 50) + '...',
               message: 'File expired (48-hour limit exceeded). Please refresh or re-upload.'
@@ -439,7 +449,10 @@ class GeminiClient {
               name: file.name,
               hasGeminiUri: !!file.geminiUri,
               hasCreateTime: !!file.createTime,
-              message: 'File may be in invalid state'
+              hasGeminiCreateTime: !!file.geminiCreateTime,
+              hasGeminiUploadTime: !!file.geminiUploadTime,
+              hasUploadTimestamp: !!file.uploadTimestamp,
+              message: 'File may be in invalid state - check timestamp fields'
             });
           }
         }
@@ -592,14 +605,28 @@ class GeminiClient {
    * Check if a file is expired (48 hours from creation)
    */
   isFileExpired(file) {
-    if (!file || !file.createTime) {
+    if (!file) {
+      return false;
+    }
+
+    // Check multiple possible timestamp fields (different parts of system use different names)
+    const createTime = file.createTime || file.geminiCreateTime || file.geminiUploadTime || file.uploadTimestamp;
+
+    if (!createTime) {
+      console.warn('aiFiverr Gemini: No timestamp found for file:', file.name, {
+        hasCreateTime: !!file.createTime,
+        hasGeminiCreateTime: !!file.geminiCreateTime,
+        hasGeminiUploadTime: !!file.geminiUploadTime,
+        hasUploadTimestamp: !!file.uploadTimestamp
+      });
       return false;
     }
 
     try {
-      const createTime = new Date(file.createTime);
+      // Handle both ISO string and timestamp formats
+      const createTimeDate = typeof createTime === 'number' ? new Date(createTime) : new Date(createTime);
       const now = new Date();
-      const hoursDiff = (now - createTime) / (1000 * 60 * 60);
+      const hoursDiff = (now - createTimeDate) / (1000 * 60 * 60);
 
       return hoursDiff >= 48;
     } catch (error) {
