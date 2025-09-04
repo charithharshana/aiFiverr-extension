@@ -823,16 +823,26 @@ class StreamingChatbox {
         };
       }
 
-      // Get API key for validation
+      // CRITICAL FIX: Get API key using same session as initial request to maintain file access consistency
       let apiKey;
       try {
         if (window.apiKeyManager && window.apiKeyManager.initialized) {
-          const keyData = window.apiKeyManager.getKeyForSession('streaming_chat');
-          apiKey = keyData ? keyData.key : null;
+          // FIXED: Try 'gemini' session first (same as initial request) for file access consistency
+          let keyData = window.apiKeyManager.getKeyForSession('gemini');
+          if (keyData) {
+            apiKey = keyData.key;
+            console.log('aiFiverr StreamingChatbox: Using gemini session API key for file validation (consistency with initial request)');
+          } else {
+            // Fallback to streaming_chat session
+            keyData = window.apiKeyManager.getKeyForSession('streaming_chat');
+            apiKey = keyData ? keyData.key : null;
+            console.log('aiFiverr StreamingChatbox: Using streaming_chat session API key for file validation (fallback)');
+          }
         }
 
         if (!apiKey && window.enhancedGeminiClient) {
           apiKey = await window.enhancedGeminiClient.getApiKey();
+          console.log('aiFiverr StreamingChatbox: Using enhancedGeminiClient API key for file validation (fallback)');
         }
 
         if (!apiKey) {
