@@ -31,6 +31,16 @@ class AiFiverrMain {
     try {
       console.log('aiFiverr: Initializing extension...');
 
+      // Check site compatibility first
+      if (window.siteCompatibilityManager) {
+        const siteConfig = window.siteCompatibilityManager.siteConfig;
+        console.log('aiFiverr: Site compatibility check:', siteConfig.name, siteConfig.features);
+
+        if (!window.siteCompatibilityManager.isFeatureAllowed('knowledgeBase')) {
+          console.log('aiFiverr: Knowledge base features disabled for this site');
+        }
+      }
+
       // Check if extension context is valid
       if (!chrome.runtime?.id) {
         console.warn('aiFiverr: Extension context invalidated, cannot initialize');

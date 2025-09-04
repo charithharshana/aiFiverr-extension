@@ -11,6 +11,12 @@ class FiverrInjector {
   }
 
   init() {
+    // Check if we should operate normally (Facebook error handling)
+    if (window.facebookErrorHandler && !window.facebookErrorHandler.shouldOperateNormally()) {
+      console.warn('aiFiverr Injector: Extension disabled due to errors, skipping initialization');
+      return;
+    }
+
     // Listen for element detection events
     window.addEventListener('aifiverr:elementsDetected', (event) => {
       this.handleElementsDetected(event.detail);
@@ -681,14 +687,40 @@ class FiverrInjector {
         hasPromptContent: !!(prompt.prompt || prompt.content || prompt.text)
       });
 
-      item.innerHTML = `
-        <div style="font-size: 14px; font-weight: 500; color: #111827; margin-bottom: 2px;">
-          ${this.escapeHtml(displayTitle)}
-        </div>
-        <div style="font-size: 12px; color: #6b7280; line-height: 1.3;">
-          ${this.escapeHtml(description)}
-        </div>
-      `;
+      // Use CSP-safe DOM creation instead of innerHTML
+      if (window.cspSafeDOMUtils && (window.aiFiverrUseCSPSafeMode || window.cspSafeDOMUtils.isStrictCSPSite())) {
+        const titleDiv = window.cspSafeDOMUtils.createElement('div', {
+          textContent: displayTitle,
+          styles: {
+            fontSize: '14px',
+            fontWeight: '500',
+            color: '#111827',
+            marginBottom: '2px'
+          }
+        });
+
+        const descDiv = window.cspSafeDOMUtils.createElement('div', {
+          textContent: description,
+          styles: {
+            fontSize: '12px',
+            color: '#6b7280',
+            lineHeight: '1.3'
+          }
+        });
+
+        item.appendChild(titleDiv);
+        item.appendChild(descDiv);
+      } else {
+        // Fallback to innerHTML for non-strict sites
+        item.innerHTML = `
+          <div style="font-size: 14px; font-weight: 500; color: #111827; margin-bottom: 2px;">
+            ${this.escapeHtml(displayTitle)}
+          </div>
+          <div style="font-size: 12px; color: #6b7280; line-height: 1.3;">
+            ${this.escapeHtml(description)}
+          </div>
+        `;
+      }
 
       // Hover effect
       item.addEventListener('mouseenter', () => {
@@ -1755,6 +1787,21 @@ class FiverrInjector {
    * Show analysis popup
    */
   showAnalysisPopup(analysis, targetElement) {
+    // Use CSP-safe popup creation
+    if (window.cspSafeDOMUtils && (window.aiFiverrUseCSPSafeMode || window.cspSafeDOMUtils.isStrictCSPSite())) {
+      const popup = window.cspSafeDOMUtils.createPopup({
+        title: 'Message Analysis',
+        content: analysis,
+        className: 'aifiverr-analysis-popup',
+        closable: true,
+        modal: true
+      });
+
+      window.cspSafeDOMUtils.showPopup(popup);
+      return popup;
+    }
+
+    // Fallback for non-strict sites
     const popup = document.createElement('div');
     popup.className = 'aifiverr-analysis-popup';
     popup.innerHTML = `
@@ -1767,20 +1814,22 @@ class FiverrInjector {
       </div>
     `;
 
-    // Style the popup
-    Object.assign(popup.style, {
-      position: 'fixed',
-      top: '50%',
-      left: '50%',
-      transform: 'translate(-50%, -50%)',
-      backgroundColor: 'white',
-      border: '1px solid #ddd',
-      borderRadius: '8px',
-      padding: '20px',
-      maxWidth: '400px',
-      zIndex: '10001',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-    });
+    // Style the popup only if inline styles are allowed
+    if (!window.facebookErrorHandler || window.facebookErrorHandler.areInlineStylesAllowed()) {
+      Object.assign(popup.style, {
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        backgroundColor: 'white',
+        border: '1px solid #ddd',
+        borderRadius: '8px',
+        padding: '20px',
+        maxWidth: '400px',
+        zIndex: '10001',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+      });
+    }
 
     document.body.appendChild(popup);
 
@@ -1878,6 +1927,53 @@ class FiverrInjector {
       existingPopup.remove();
     }
 
+    // Use CSP-safe popup creation
+    if (window.cspSafeDOMUtils && (window.aiFiverrUseCSPSafeMode || window.cspSafeDOMUtils.isStrictCSPSite())) {
+      // Create content container with copy button
+      const contentContainer = window.cspSafeDOMUtils.createElement('div');
+
+      const contentDiv = window.cspSafeDOMUtils.createElement('div', {
+        textContent: result.content,
+        styles: {
+          marginBottom: '16px',
+          lineHeight: '1.5'
+        }
+      });
+
+      const copyButton = window.cspSafeDOMUtils.createElement('button', {
+        textContent: 'Copy',
+        styles: {
+          backgroundColor: '#1dbf73',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          padding: '8px 16px',
+          cursor: 'pointer'
+        }
+      });
+
+      copyButton.addEventListener('click', () => {
+        navigator.clipboard.writeText(result.content);
+        copyButton.textContent = 'Copied!';
+        setTimeout(() => copyButton.textContent = 'Copy', 2000);
+      });
+
+      contentContainer.appendChild(contentDiv);
+      contentContainer.appendChild(copyButton);
+
+      const popup = window.cspSafeDOMUtils.createPopup({
+        title: result.title,
+        content: contentContainer,
+        className: 'aifiverr-action-result-popup',
+        closable: true,
+        modal: true
+      });
+
+      window.cspSafeDOMUtils.showPopup(popup);
+      return popup;
+    }
+
+    // Fallback for non-strict sites
     const popup = document.createElement('div');
     popup.className = 'aifiverr-action-result-popup';
     popup.innerHTML = `
