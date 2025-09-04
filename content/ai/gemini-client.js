@@ -351,6 +351,14 @@ class GeminiClient {
       const currentMessageParts = [];
 
       // Add knowledge base files first if provided
+      console.log('🚨 GEMINI CLIENT CHAT: Received options:', {
+        hasKnowledgeBaseFiles: !!options.knowledgeBaseFiles,
+        knowledgeBaseFilesCount: options.knowledgeBaseFiles?.length || 0,
+        knowledgeBaseFilesType: typeof options.knowledgeBaseFiles,
+        googleSearchGrounding: options.googleSearchGrounding,
+        urlContextExtraction: options.urlContextExtraction
+      });
+
       if (options.knowledgeBaseFiles && options.knowledgeBaseFiles.length > 0) {
         let validFilesCount = 0;
         console.log('🔍 GEMINI CHAT: Checking', options.knowledgeBaseFiles.length, 'knowledge base files for expiration');

@@ -1735,7 +1735,32 @@ class TextSelector {
 
         // CRITICAL FIX: Use knowledge base manager for saved prompts to get attached files
         // The variable processor doesn't know about files attached to saved prompts
-        if (window.knowledgeBaseManager && promptKey) {
+        let useKnowledgeBaseManager = false;
+
+        if (promptKey) {
+          // For saved prompts, we MUST use the knowledge base manager to get attached files
+          if (window.knowledgeBaseManager) {
+            useKnowledgeBaseManager = true;
+          } else {
+            // Knowledge base manager not available - try to initialize it
+            console.warn('aiFiverr: Knowledge base manager not available for saved prompt, attempting emergency initialization...');
+            if (typeof window.initializeKnowledgeBaseManager === 'function') {
+              try {
+                await window.initializeKnowledgeBaseManager();
+                if (window.knowledgeBaseManager) {
+                  useKnowledgeBaseManager = true;
+                  console.log('aiFiverr: Emergency initialization successful');
+                } else {
+                  console.error('aiFiverr: Emergency initialization failed - saved prompt files may not be attached');
+                }
+              } catch (error) {
+                console.error('aiFiverr: Emergency initialization error:', error);
+              }
+            }
+          }
+        }
+
+        if (useKnowledgeBaseManager && promptKey) {
           try {
             console.log('aiFiverr: Using knowledge base manager for saved prompt processing');
 
@@ -1755,8 +1780,8 @@ class TextSelector {
           }
 
           console.log('aiFiverr: Knowledge base manager processing result:');
-          console.log('aiFiverr: Files from saved prompt:', (result.knowledgeBaseFiles || []).length);
-          console.log('aiFiverr: Files details:', (result.knowledgeBaseFiles || []).map(f => ({
+          console.log('aiFiverr: Files from saved prompt:', (result?.knowledgeBaseFiles || []).length);
+          console.log('aiFiverr: Files details:', (result?.knowledgeBaseFiles || []).map(f => ({
             name: f.name,
             hasGeminiUri: !!f.geminiUri,
             mimeType: f.mimeType
@@ -1839,41 +1864,54 @@ class TextSelector {
 
       // CRITICAL FIX: If no files specified in prompt, include all available knowledge base files
       // This ensures floating icon has access to knowledge base files like other components
-      if (knowledgeBaseFiles.length === 0 && window.knowledgeBaseManager) {
-        try {
-          console.log('aiFiverr: No files from variable processor, attempting to load all available knowledge base files');
+      if (knowledgeBaseFiles.length === 0) {
+        // Try to ensure knowledge base manager is available
+        let kbManagerAvailable = !!window.knowledgeBaseManager;
 
-          // For floating icon, we should include all available knowledge base files
-          // This matches the behavior of other components like popup and streaming chatbox
-          knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFiles();
-
-          console.log('aiFiverr: Loaded all available knowledge base files:', knowledgeBaseFiles.length, 'files');
-
-          // If the main method didn't work, try the optimized method as fallback
-          if (knowledgeBaseFiles.length === 0) {
-            console.log('aiFiverr: Main method returned no files, trying optimized method');
-
-            const fileOptions = {
-              manuallySelectedFiles: null,
-              promptReferencedFiles: null,
-              enableSmartSelection: true,
-              promptText: processedPrompt,
-              fallbackToAll: true // Load all files as fallback
-            };
-
-            knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFilesOptimized(fileOptions);
-            console.log('aiFiverr: Optimized method found', knowledgeBaseFiles.length, 'files');
+        if (!kbManagerAvailable && typeof window.initializeKnowledgeBaseManager === 'function') {
+          console.log('aiFiverr: Knowledge base manager not available for file loading, attempting initialization...');
+          try {
+            await window.initializeKnowledgeBaseManager();
+            kbManagerAvailable = !!window.knowledgeBaseManager;
+          } catch (error) {
+            console.warn('aiFiverr: Failed to initialize knowledge base manager for file loading:', error);
           }
+        }
 
-        } catch (error) {
-          console.warn('aiFiverr: Failed to load knowledge base files:', error);
+        if (kbManagerAvailable) {
+          try {
+            console.log('aiFiverr: No files from prompt processing, attempting to load all available knowledge base files');
 
-          // Final fallback: empty array
+            // For floating icon, we should include all available knowledge base files
+            // This matches the behavior of other components like popup and streaming chatbox
+            knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFiles();
+
+            console.log('aiFiverr: Loaded all available knowledge base files:', knowledgeBaseFiles.length, 'files');
+
+            // If the main method didn't work, try the optimized method as fallback
+            if (knowledgeBaseFiles.length === 0) {
+              console.log('aiFiverr: Main method returned no files, trying optimized method');
+
+              const fileOptions = {
+                manuallySelectedFiles: null,
+                promptReferencedFiles: null,
+                enableSmartSelection: true,
+                promptText: processedPrompt,
+                fallbackToAll: true // Load all files as fallback
+              };
+
+              knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFilesOptimized(fileOptions);
+              console.log('aiFiverr: Optimized method found', knowledgeBaseFiles.length, 'files');
+            }
+
+          } catch (error) {
+            console.warn('aiFiverr: Failed to load knowledge base files:', error);
+            knowledgeBaseFiles = [];
+          }
+        } else {
+          console.log('aiFiverr: Knowledge base manager not available - proceeding without knowledge base files');
           knowledgeBaseFiles = [];
         }
-      } else if (knowledgeBaseFiles.length === 0 && !window.knowledgeBaseManager) {
-        console.log('aiFiverr: Knowledge base manager not available - proceeding without knowledge base files');
-        knowledgeBaseFiles = [];
       }
 
       if (knowledgeBaseFiles.length === 0) {
@@ -1979,12 +2017,29 @@ class TextSelector {
       const groundingOptions = this.getGroundingOptions();
       console.log('aiFiverr: Using grounding options:', groundingOptions);
 
+      // CRITICAL DEBUG: Log final knowledge base files before API call
+      console.log('🚨 TEXT-SELECTOR: Final knowledge base files before API call:', {
+        count: knowledgeBaseFiles.length,
+        files: knowledgeBaseFiles.map(f => ({
+          name: f.name,
+          hasGeminiUri: !!f.geminiUri,
+          geminiUri: f.geminiUri?.substring(0, 50) + '...',
+          mimeType: f.mimeType
+        }))
+      });
+
       let response;
       try {
         const apiOptions = {
           knowledgeBaseFiles,
           ...groundingOptions
         };
+
+        console.log('🚨 TEXT-SELECTOR: API options being sent to Gemini client:', {
+          hasKnowledgeBaseFiles: !!apiOptions.knowledgeBaseFiles,
+          knowledgeBaseFilesCount: apiOptions.knowledgeBaseFiles?.length || 0,
+          groundingOptions: groundingOptions
+        });
 
         response = await window.geminiClient.generateChatReply(session, finalPrompt, apiOptions);
 
