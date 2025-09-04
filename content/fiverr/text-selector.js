@@ -2059,16 +2059,25 @@ class TextSelector {
           // Check if StreamingChatbox is available
           if (typeof window.StreamingChatbox === 'undefined') {
             console.error('aiFiverr: StreamingChatbox not available, keeping popup open');
+            console.error('aiFiverr: Available window properties:', Object.keys(window).filter(key => key.includes('Stream') || key.includes('Chat')));
             this.showToast('Streaming chat not available. Please try again.');
             return;
           }
 
-          // Validate context before transition
-          const contextValidation = this.validateTransitionContext(currentText, originalSelectedText);
-          if (!contextValidation.isValid) {
-            console.error('aiFiverr: Context validation failed:', contextValidation.error);
-            this.showToast(`Cannot transition to chat: ${contextValidation.error}`);
-            return;
+          console.log('aiFiverr: StreamingChatbox class is available');
+
+          // Validate context before transition (with fallback)
+          try {
+            const contextValidation = this.validateTransitionContext(currentText, originalSelectedText);
+            if (!contextValidation.isValid) {
+              console.error('aiFiverr: Context validation failed:', contextValidation.error);
+              this.showToast(`Cannot transition to chat: ${contextValidation.error}`);
+              return;
+            }
+            console.log('aiFiverr: Context validation passed');
+          } catch (validationError) {
+            console.warn('aiFiverr: Context validation threw error, proceeding anyway:', validationError);
+            // Continue with transition even if validation fails
           }
 
           // Show streaming chatbox with conversation context
@@ -3402,10 +3411,23 @@ class TextSelector {
         });
 
         // Check if creation was successful
-        if (!this.streamingChatbox || !this.streamingChatbox.chatboxElement) {
-          console.error('aiFiverr: Failed to create StreamingChatbox instance');
+        if (!this.streamingChatbox) {
+          console.error('aiFiverr: Failed to create StreamingChatbox instance - constructor returned null/undefined');
           return false;
         }
+
+        if (!this.streamingChatbox.chatboxElement) {
+          console.error('aiFiverr: StreamingChatbox created but chatboxElement is null/undefined');
+          console.error('aiFiverr: StreamingChatbox properties:', {
+            hasInit: typeof this.streamingChatbox.init === 'function',
+            hasShow: typeof this.streamingChatbox.show === 'function',
+            hasHide: typeof this.streamingChatbox.hide === 'function',
+            isVisible: this.streamingChatbox.isVisible
+          });
+          return false;
+        }
+
+        console.log('aiFiverr: StreamingChatbox instance created successfully');
       }
 
       // NEW: Enhanced context preservation with validation
@@ -3435,8 +3457,14 @@ class TextSelector {
         console.log('aiFiverr: No manually attached files to transfer');
       }
 
-      // NEW: Ensure API key session consistency
-      await this.ensureAPIKeySessionConsistency();
+      // NEW: Ensure API key session consistency (with fallback)
+      try {
+        await this.ensureAPIKeySessionConsistency();
+        console.log('aiFiverr: API key session consistency ensured');
+      } catch (apiKeyError) {
+        console.warn('aiFiverr: API key session consistency failed, proceeding anyway:', apiKeyError);
+        // Continue with transition even if API key session setup fails
+      }
 
       // Clear any existing conversation history and UI messages
       this.streamingChatbox.conversationHistory = [];
@@ -3488,11 +3516,17 @@ class TextSelector {
         parts: [{ text: initialResult }]
       });
 
-      // Verify chatbox is actually visible before proceeding
+      // CRITICAL FIX: Actually show the chatbox before checking visibility
+      console.log('aiFiverr: Showing streaming chatbox...');
+      this.streamingChatbox.show();
+
+      // Verify chatbox is actually visible after showing it
       if (!this.streamingChatbox.isVisible) {
-        console.error('aiFiverr: Streaming chatbox failed to show');
+        console.error('aiFiverr: Streaming chatbox failed to show after calling show() method');
         return false;
       }
+
+      console.log('aiFiverr: Streaming chatbox is now visible');
 
       // Add the initial messages to the UI (display the original text for user, AI result as-is)
       this.streamingChatbox.addMessage('user', originalText);
