@@ -890,23 +890,12 @@ class StreamingChatbox {
           }
         }
 
-        // Test file accessibility for files that previously caused issues
+        // SIMPLE APPROACH: Block known problematic files, include everything else
         const fileId = file.geminiUri.split('/').pop();
         if (fileId === '46vm361k1btt') {
-          console.log('🔍 StreamingChatbox: Testing accessibility for previously problematic file:', file.name);
-          const isAccessible = await this.testFileAccessibility(file);
-          if (!isAccessible) {
-            console.warn('🚨 StreamingChatbox: File accessibility test failed for:', file.name);
-
-            // FALLBACK: Try to include the file anyway and let the API decide
-            // This prevents false negatives from blocking legitimate files
-            console.log('🔄 StreamingChatbox: Including file despite accessibility test failure - API will validate');
-
-            // Add a flag to track that this file had accessibility issues
-            file._accessibilityTestFailed = true;
-          } else {
-            console.log('✅ StreamingChatbox: File is accessible, including in request:', file.name);
-          }
+          console.warn('🚫 StreamingChatbox: Skipping known problematic file:', file.name, 'ID:', fileId);
+          console.warn('🚫 This file has been confirmed to cause 403 permission errors');
+          continue; // Skip this file completely
         }
 
         validFiles.push(file);
@@ -917,49 +906,22 @@ class StreamingChatbox {
 
     console.log(`🔍 StreamingChatbox: File validation complete. ${files.length} → ${validFiles.length} files`);
 
-    // Check for files with accessibility test failures but still included
-    const filesWithAccessibilityIssues = validFiles.filter(file => file._accessibilityTestFailed);
-    if (filesWithAccessibilityIssues.length > 0) {
-      console.log(`⚠️ StreamingChatbox: ${filesWithAccessibilityIssues.length} file(s) had accessibility test failures but were included anyway`);
-      this.showFileAccessibilityWarning(filesWithAccessibilityIssues);
-    }
-
     // Provide user feedback if files were filtered out
     if (files.length > validFiles.length) {
       const filteredCount = files.length - validFiles.length;
       const filteredFiles = files.filter(file => !validFiles.includes(file));
 
-      console.log(`⚠️ StreamingChatbox: ${filteredCount} file(s) were filtered out due to accessibility issues`);
+      console.log(`⚠️ StreamingChatbox: ${filteredCount} file(s) were filtered out due to known issues`);
       console.log('Filtered files:', filteredFiles.map(f => f.name));
 
-      // Show a subtle notification to the user
+      // Show a clear notification to the user
       this.showFileFilterNotification(filteredCount, filteredFiles);
     }
 
     return validFiles;
   }
 
-  /**
-   * Show warning to user when files have accessibility test failures but are still included
-   * @param {Array} filesWithIssues - Array of files with accessibility issues
-   */
-  showFileAccessibilityWarning(filesWithIssues) {
-    try {
-      let warningMessage = `ℹ️ File accessibility notice:\n`;
 
-      filesWithIssues.forEach(file => {
-        warningMessage += `• ${file.name} - accessibility test failed but file was included anyway\n`;
-      });
-
-      warningMessage += '\nIf the AI reports that it cannot access these files, please refresh them in your knowledge base.';
-
-      // Add as a system message
-      this.addMessage('system', warningMessage);
-
-    } catch (error) {
-      console.warn('StreamingChatbox: Error showing file accessibility warning:', error);
-    }
-  }
 
   /**
    * Show notification to user when files are filtered out
@@ -968,14 +930,15 @@ class StreamingChatbox {
    */
   showFileFilterNotification(filteredCount, filteredFiles = []) {
     try {
-      // Create detailed message about filtered files
-      let notificationMessage = `⚠️ ${filteredCount} file(s) were not included due to accessibility issues:\n`;
+      // Create honest message about filtered files
+      let notificationMessage = `🚫 ${filteredCount} file(s) were excluded due to known permission issues:\n`;
 
       filteredFiles.forEach(file => {
-        notificationMessage += `• ${file.name} (may have expired or need refresh)\n`;
+        const fileId = file.geminiUri ? file.geminiUri.split('/').pop() : 'unknown';
+        notificationMessage += `• ${file.name} (ID: ${fileId}) - causes 403 permission errors\n`;
       });
 
-      notificationMessage += '\nThe AI response will be based on available context only. To include these files, please refresh them in your knowledge base.';
+      notificationMessage += '\nThese files have been confirmed to be inaccessible and are excluded to prevent API errors. The AI will work with available files only.';
 
       // Add as a system message
       this.addMessage('system', notificationMessage);
@@ -985,146 +948,7 @@ class StreamingChatbox {
     }
   }
 
-  /**
-   * Test if a file is accessible before including it in API requests
-   * @param {Object} file - File to test
-   * @returns {boolean} - True if file is accessible
-   */
-  async testFileAccessibility(file) {
-    try {
-      console.log(`🔍 StreamingChatbox: Starting accessibility test for file:`, {
-        name: file.name,
-        geminiUri: file.geminiUri,
-        mimeType: file.mimeType
-      });
 
-      if (!file.geminiUri) {
-        console.warn(`🚨 StreamingChatbox: File ${file.name} has no geminiUri`);
-        return false;
-      }
-
-      // Check if geminiApiManager is available
-      if (!window.geminiApiManager) {
-        console.warn('🚨 StreamingChatbox: geminiApiManager not available, trying alternative API key sources');
-
-        // Try alternative API key sources
-        let apiKey = null;
-
-        // Try apiKeyManager
-        if (window.apiKeyManager && window.apiKeyManager.initialized) {
-          const keyData = window.apiKeyManager.getNextKey();
-          apiKey = keyData ? keyData.key : null;
-          console.log('🔍 StreamingChatbox: Using API key from apiKeyManager:', !!apiKey);
-        }
-
-        // Try direct storage access
-        if (!apiKey && window.storageManager) {
-          try {
-            const settings = await window.storageManager.get(['geminiApiKey']);
-            apiKey = settings.geminiApiKey;
-            console.log('🔍 StreamingChatbox: Using API key from storage:', !!apiKey);
-          } catch (error) {
-            console.warn('🚨 StreamingChatbox: Failed to get API key from storage:', error);
-          }
-        }
-
-        if (!apiKey) {
-          console.warn('🚨 StreamingChatbox: No API key available from any source');
-          return false;
-        }
-
-        return await this.performFileAccessibilityTest(file, apiKey);
-      }
-
-      // Get current API key from geminiApiManager
-      const apiKey = await window.geminiApiManager.getCurrentApiKey();
-      if (!apiKey) {
-        console.warn('🚨 StreamingChatbox: No API key available for file accessibility test');
-        return false;
-      }
-
-      return await this.performFileAccessibilityTest(file, apiKey);
-
-    } catch (error) {
-      console.error(`🚨 StreamingChatbox: Unexpected error in testFileAccessibility for ${file.name}:`, error);
-      return false;
-    }
-  }
-
-  /**
-   * Perform the actual file accessibility test with detailed logging
-   * @param {Object} file - File to test
-   * @param {string} apiKey - API key to use for testing
-   * @returns {boolean} - True if file is accessible
-   */
-  async performFileAccessibilityTest(file, apiKey) {
-    try {
-      // Extract file name from URI
-      const fileName = file.geminiUri.split('/').pop();
-      console.log(`🔍 StreamingChatbox: Testing file ID: ${fileName} for file: ${file.name}`);
-
-      // Test file accessibility with a simple GET request
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // Increased to 5 second timeout
-
-      const testUrl = `https://generativelanguage.googleapis.com/v1beta/files/${fileName}?key=${apiKey}`;
-      console.log(`🔍 StreamingChatbox: Making request to: ${testUrl.replace(apiKey, 'API_KEY_HIDDEN')}`);
-
-      const response = await fetch(testUrl, {
-        method: 'GET',
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      console.log(`🔍 StreamingChatbox: Response status for ${file.name}:`, {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok
-      });
-
-      if (response.ok) {
-        const fileInfo = await response.json();
-        const isActive = fileInfo.state === 'ACTIVE';
-
-        console.log(`🔍 StreamingChatbox: File info for ${file.name}:`, {
-          name: fileInfo.name,
-          displayName: fileInfo.displayName,
-          state: fileInfo.state,
-          createTime: fileInfo.createTime,
-          updateTime: fileInfo.updateTime,
-          expirationTime: fileInfo.expirationTime,
-          isActive
-        });
-
-        return isActive;
-      } else {
-        // Get detailed error information
-        let errorDetails = null;
-        try {
-          errorDetails = await response.json();
-        } catch (e) {
-          console.warn('🚨 StreamingChatbox: Could not parse error response as JSON');
-        }
-
-        console.warn(`🚨 StreamingChatbox: File accessibility test failed for ${file.name}:`, {
-          status: response.status,
-          statusText: response.statusText,
-          errorDetails
-        });
-
-        return false;
-      }
-
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        console.warn(`🚨 StreamingChatbox: File accessibility test timed out for ${file.name}`);
-      } else {
-        console.warn(`🚨 StreamingChatbox: File accessibility test error for ${file.name}:`, error.message);
-      }
-      return false;
-    }
-  }
 
   /**
    * Set manually attached files
@@ -1545,7 +1369,7 @@ class StreamingChatbox {
 
         // If no key for this session, get any available key but mark the session
         if (!apiKey) {
-          const newKeyData = window.apiKeyManager.getNextKey();
+          const newKeyData = window.apiKeyManager.getNextHealthyKey();
           if (newKeyData) {
             apiKey = newKeyData.key;
             // Associate this key with our session to maintain consistency
@@ -1653,17 +1477,13 @@ class StreamingChatbox {
       if (lastUserMessage.role === 'user') {
         for (const file of knowledgeBaseFiles) {
           if (file.geminiUri) {
-            // Clean up internal flags before sending to API
-            const cleanFile = { ...file };
-            delete cleanFile._accessibilityTestFailed;
-
             lastUserMessage.parts.unshift({
               fileData: {
-                fileUri: cleanFile.geminiUri,
-                mimeType: cleanFile.mimeType || 'text/plain'
+                fileUri: file.geminiUri,
+                mimeType: file.mimeType || 'text/plain'
               }
             });
-            console.log('aiFiverr StreamingChatbox: Added validated file to message:', cleanFile.name);
+            console.log('aiFiverr StreamingChatbox: Added validated file to message:', file.name);
           }
         }
       }
