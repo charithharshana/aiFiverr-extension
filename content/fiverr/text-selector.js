@@ -3319,6 +3319,23 @@ class TextSelector {
           enableDragging: true,
           enableResizing: true
         });
+
+        // Wait for initialization to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Verify chatbox element was created
+        if (!this.streamingChatbox.chatboxElement) {
+          console.error('❌ aiFiverr: StreamingChatbox element not created');
+          return false;
+        }
+
+        // Verify element is in DOM
+        if (!document.body.contains(this.streamingChatbox.chatboxElement)) {
+          console.error('❌ aiFiverr: StreamingChatbox element not in DOM');
+          return false;
+        }
+
+        console.log('✅ aiFiverr: StreamingChatbox initialized successfully');
       }
 
       // NEW: Set original context for consistent variable usage
@@ -3359,8 +3376,12 @@ class TextSelector {
 
       // CRITICAL: Include the same files that were used in the original AI request
       if (this.lastKnowledgeBaseFiles && this.lastKnowledgeBaseFiles.length > 0) {
-        // Add files to the beginning of the parts array (same as streaming chat does)
-        for (const file of this.lastKnowledgeBaseFiles) {
+        // Validate files before adding to conversation history
+        const validFiles = await this.streamingChatbox.validateFilesBeforeAPICall(this.lastKnowledgeBaseFiles);
+        console.log(`aiFiverr: File validation for conversation history: ${this.lastKnowledgeBaseFiles.length} → ${validFiles.length} files`);
+
+        // Add validated files to the beginning of the parts array (same as streaming chat does)
+        for (const file of validFiles) {
           if (file.geminiUri) {
             userMessageParts.unshift({
               fileData: {
@@ -3368,7 +3389,7 @@ class TextSelector {
                 mimeType: file.mimeType || 'text/plain'
               }
             });
-            console.log('aiFiverr: Added original file to conversation history:', file.name);
+            console.log('aiFiverr: Added validated file to conversation history:', file.name);
           }
         }
       }
@@ -3383,8 +3404,17 @@ class TextSelector {
         parts: [{ text: initialResult }]
       });
 
-      // Show the chatbox first
-      this.streamingChatbox.show();
+      // Show the chatbox first with validation
+      console.log('aiFiverr: Attempting to show streaming chatbox...');
+      const showResult = this.streamingChatbox.show();
+
+      if (showResult === false) {
+        console.error('❌ aiFiverr: Failed to show streaming chatbox');
+        return false;
+      }
+
+      // Debug chatbox status
+      this.streamingChatbox.debugStatus();
 
       // Add the initial messages to the UI (display the original text for user, AI result as-is)
       this.streamingChatbox.addMessage('user', originalText);
@@ -3393,7 +3423,7 @@ class TextSelector {
       // Hide the floating icon since we now have the chatbox
       this.hideFloatingIcon();
 
-      console.log('aiFiverr: Streaming chatbox initialized with conversation context:', this.streamingChatbox.conversationHistory);
+      console.log('✅ aiFiverr: Streaming chatbox initialized successfully with conversation context:', this.streamingChatbox.conversationHistory);
 
       return true; // Success
     } catch (error) {

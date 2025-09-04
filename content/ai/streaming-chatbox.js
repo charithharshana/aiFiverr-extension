@@ -20,7 +20,6 @@ class StreamingChatbox {
     this.isStreaming = false;
     this.currentStreamingMessage = null;
     this.conversationHistory = [];
-    this.blacklistedFileIds = new Set(); // Track files that caused 403 errors
     this.chatboxElement = null;
     this.messagesContainer = null;
     this.inputElement = null;
@@ -32,21 +31,37 @@ class StreamingChatbox {
     this.originalVariableUsage = null; // Stores which variables were used in original prompt
     this.manuallyAttachedFiles = []; // Stores manually attached files
 
-    this.init();
+    // Split initialization for better timing control
+    this.initSync();
+    this.initAsync().catch(error => {
+      console.error('aiFiverr StreamingChatbox: Failed to initialize async components:', error);
+    });
   }
 
   /**
-   * Initialize the chatbox
+   * Initialize synchronous components (DOM elements, event listeners)
    */
-  init() {
+  initSync() {
     try {
       this.createChatboxElement();
       this.setupEventListeners();
-      this.initializeMarkdownRenderer();
       this.hide(); // Start hidden
+      console.log('aiFiverr StreamingChatbox: Sync initialization completed');
     } catch (error) {
-      console.error('aiFiverr StreamingChatbox: Error during initialization:', error);
+      console.error('aiFiverr StreamingChatbox: Error during sync initialization:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Initialize asynchronous components (markdown renderer, file validation)
+   */
+  async initAsync() {
+    try {
+      this.initializeMarkdownRenderer();
+      console.log('aiFiverr StreamingChatbox: Async initialization completed');
+    } catch (error) {
+      console.error('aiFiverr StreamingChatbox: Error during async initialization:', error);
     }
   }
 
@@ -677,8 +692,26 @@ class StreamingChatbox {
    * Show the chatbox
    */
   show(initialMessage = null) {
+    console.log('👁️ StreamingChatbox: show() called');
+
+    if (!this.chatboxElement) {
+      console.error('❌ StreamingChatbox: Cannot show - chatboxElement not created');
+      return false;
+    }
+
     this.isVisible = true;
     this.chatboxElement.style.display = 'flex';
+
+    // Debug visibility
+    const computedStyles = window.getComputedStyle(this.chatboxElement);
+    console.log('🔍 StreamingChatbox: Visibility debug:', {
+      isVisible: this.isVisible,
+      display: this.chatboxElement.style.display,
+      computedDisplay: computedStyles.display,
+      zIndex: computedStyles.zIndex,
+      position: computedStyles.position,
+      inDOM: document.body.contains(this.chatboxElement)
+    });
 
     if (initialMessage) {
       this.addMessage('assistant', initialMessage);
@@ -686,8 +719,32 @@ class StreamingChatbox {
 
     // Focus input
     setTimeout(() => {
-      this.inputElement.focus();
+      if (this.inputElement) {
+        this.inputElement.focus();
+      }
     }, 100);
+
+    return true;
+  }
+
+  /**
+   * Debug status method for troubleshooting
+   */
+  debugStatus() {
+    const status = {
+      isVisible: this.isVisible,
+      hasElement: !!this.chatboxElement,
+      elementInDOM: this.chatboxElement ? document.body.contains(this.chatboxElement) : false,
+      elementDisplay: this.chatboxElement ? this.chatboxElement.style.display : 'N/A',
+      hasMessagesContainer: !!this.messagesContainer,
+      hasInputElement: !!this.inputElement,
+      hasSendButton: !!this.sendButton,
+      conversationHistoryLength: this.conversationHistory.length,
+      isStreaming: this.isStreaming
+    };
+
+    console.log('🔍 StreamingChatbox Debug Status:', status);
+    return status;
   }
 
   /**
@@ -709,25 +766,66 @@ class StreamingChatbox {
   }
 
   /**
+   * Validate files before API call to prevent stale file errors
+   * @param {Array} files - Files to validate
+   * @returns {Array} - Valid files only
+   */
+  async validateFilesBeforeAPICall(files) {
+    if (!files || !Array.isArray(files)) {
+      return [];
+    }
+
+    const validFiles = [];
+    const suspiciousFileIds = ['wrpdb7uq3ddk']; // Known problematic file IDs
+
+    for (const file of files) {
+      try {
+        // Check for suspicious file IDs
+        if (file.geminiUri && suspiciousFileIds.some(id => file.geminiUri.includes(id))) {
+          console.warn('🚨 StreamingChatbox: Skipping suspicious file ID:', file.geminiUri);
+          continue;
+        }
+
+        // Validate URI format
+        if (!file.geminiUri || !file.geminiUri.startsWith('https://generativelanguage.googleapis.com/v1beta/files/')) {
+          console.warn('🚨 StreamingChatbox: Invalid file URI format:', file.geminiUri);
+          continue;
+        }
+
+        // Check if file has required properties
+        if (!file.name || !file.mimeType) {
+          console.warn('🚨 StreamingChatbox: File missing required properties:', file);
+          continue;
+        }
+
+        // Check if file is expired using knowledge base manager
+        if (window.knowledgeBaseManager && typeof window.knowledgeBaseManager.isFileExpired === 'function') {
+          const isExpired = await window.knowledgeBaseManager.isFileExpired(file);
+          if (isExpired) {
+            console.warn('🚨 StreamingChatbox: File is expired:', file.name);
+            continue;
+          }
+        }
+
+        validFiles.push(file);
+      } catch (error) {
+        console.error('🚨 StreamingChatbox: Error validating file:', file, error);
+      }
+    }
+
+    console.log(`🔍 StreamingChatbox: File validation complete. ${files.length} → ${validFiles.length} files`);
+    return validFiles;
+  }
+
+  /**
    * Set manually attached files
    * @param {Array} files - Manually attached files
    */
   async setManuallyAttachedFiles(files) {
-    const originalFiles = files || [];
-    console.log('aiFiverr StreamingChatbox: Setting manually attached files:', originalFiles.length);
-
-    // Set files directly - validation will happen during API call
-    this.manuallyAttachedFiles = originalFiles;
-    console.log('✅ STREAMING CHATBOX: Manually attached files set:', this.manuallyAttachedFiles.length);
-
-    if (this.manuallyAttachedFiles.length > 0) {
-      console.log('📁 STREAMING CHATBOX: Files will be validated during API call:',
-        this.manuallyAttachedFiles.map(f => ({
-          name: f.name,
-          fileId: f.geminiUri ? f.geminiUri.split('/').pop() : 'no-uri'
-        }))
-      );
-    }
+    // Validate files before setting them
+    const validFiles = await this.validateFilesBeforeAPICall(files || []);
+    this.manuallyAttachedFiles = validFiles;
+    console.log('aiFiverr StreamingChatbox: Manually attached files set:', this.manuallyAttachedFiles.length);
 
     // DEBUG: Log detailed file information for context transfer debugging
     if (this.manuallyAttachedFiles.length > 0) {
@@ -756,7 +854,6 @@ class StreamingChatbox {
     this.originalVariableUsage = null;
     this.manuallyAttachedFiles = [];
     this.currentMessageFiles = [];
-    this.blacklistedFileIds = new Set(); // Clear blacklisted files for new session
 
     // Clear messages from UI
     if (this.messagesContainer) {
@@ -1119,11 +1216,7 @@ class StreamingChatbox {
   /**
    * Stream response with full conversation context
    */
-  async streamWithFullContext(retryCount = 0) {
-    if (retryCount > 0) {
-      console.log(`🔄 STREAMING CHATBOX: Retry attempt ${retryCount}/3 for API call`);
-    }
-
+  async streamWithFullContext() {
     // NEW: Enhanced API key handling with rotation support
     let apiKey;
     let sessionId = 'streaming_chat'; // Consistent session ID for this chat
@@ -1164,201 +1257,60 @@ class StreamingChatbox {
     // Build complete conversation context
     const contents = [];
 
-    // Add conversation history (with file validation)
+    // Add conversation history
     for (const message of this.conversationHistory) {
-      // Filter out any stale file references from message parts
-      const cleanParts = message.parts.filter(part => {
-        if (part.fileData && part.fileData.fileUri) {
-          const fileId = part.fileData.fileUri.split('/').pop();
-
-          // CRITICAL FIX: Check blacklist first
-          if (this.blacklistedFileIds && this.blacklistedFileIds.has(fileId)) {
-            console.log('🚫 STREAMING CHATBOX: Filtering out blacklisted file from conversation history:', fileId);
-            return false;
-          }
-
-          // Only skip parts with extremely invalid file IDs
-          if (fileId.length < 8) {
-            console.log('🚫 STREAMING CHATBOX: Filtering out invalid file from conversation history:', fileId);
-            return false;
-          }
-        }
-        return true;
-      });
-
       contents.push({
         role: message.role === 'model' ? 'model' : 'user',
-        parts: cleanParts
+        parts: message.parts
       });
     }
 
     // NEW: Get files based on variable processor logic (manually attached + referenced files)
     let knowledgeBaseFiles = [];
 
-    // Show files already in conversation history for debugging
-    const conversationFileIds = [];
-    for (const message of contents) {
-      if (message.parts) {
-        message.parts.forEach(part => {
-          if (part.fileData && part.fileData.fileUri) {
-            const fileId = part.fileData.fileUri.split('/').pop();
-            conversationFileIds.push(fileId);
-          }
-        });
-      }
-    }
-
-    console.log('🔍 STREAMING CHATBOX: Files already in conversation history:', conversationFileIds);
-
-    // Show current blacklist status
-    console.log('🔍 STREAMING CHATBOX: Blacklist system status:');
-    console.log('  - blacklistedFileIds exists:', !!this.blacklistedFileIds);
-    console.log('  - blacklistedFileIds type:', typeof this.blacklistedFileIds);
-    console.log('  - blacklistedFileIds size:', this.blacklistedFileIds ? this.blacklistedFileIds.size : 'N/A');
-
-    if (this.blacklistedFileIds && this.blacklistedFileIds.size > 0) {
-      console.log('🚫 STREAMING CHATBOX: Current blacklist before file processing:', Array.from(this.blacklistedFileIds));
-    } else {
-      console.log('🔍 STREAMING CHATBOX: No files currently blacklisted (blacklist is empty, not missing)');
-    }
-
     // Priority 1: Manually attached files (always include)
     if (this.manuallyAttachedFiles && this.manuallyAttachedFiles.length > 0) {
-      console.log('🚨 STREAMING CHATBOX: Processing manually attached files:', this.manuallyAttachedFiles.length);
-      console.log('🚨 STREAMING CHATBOX: Raw manually attached files:',
-        this.manuallyAttachedFiles.map(f => ({ name: f.name, fileId: f.geminiUri?.split('/').pop() }))
+      knowledgeBaseFiles.push(...this.manuallyAttachedFiles);
+      console.log('🚨 STREAMING CHATBOX: Including manually attached files:', this.manuallyAttachedFiles.length);
+      console.log('🚨 STREAMING CHATBOX: Files being included:',
+        this.manuallyAttachedFiles.map(f => ({ name: f.name, geminiUri: f.geminiUri }))
       );
-
-      // Filter out blacklisted files only (allow duplicates unless blacklisted)
-      const validManualFiles = this.manuallyAttachedFiles.filter(file => {
-        if (file.geminiUri) {
-          const fileId = file.geminiUri.split('/').pop();
-
-          // Check blacklist - this is the ONLY reason to skip files
-          if (this.blacklistedFileIds && this.blacklistedFileIds.has(fileId)) {
-            console.warn('🚫 STREAMING CHATBOX: Skipping blacklisted manually attached file:', file.name, fileId);
-            return false;
-          }
-
-          // CRITICAL FIX: Don't prevent duplicates unless file is blacklisted
-          // Files can exist in both conversation history and new attachments
-          // The API will handle duplicates gracefully, but we need all valid files
-          console.log('✅ STREAMING CHATBOX: Including manually attached file:', file.name, fileId);
-        }
-        return true;
-      });
-
-      knowledgeBaseFiles.push(...validManualFiles);
-      console.log('🚨 STREAMING CHATBOX: Including manually attached files:', validManualFiles.length, 'of', this.manuallyAttachedFiles.length);
-      if (validManualFiles.length !== this.manuallyAttachedFiles.length) {
-        const filteredCount = this.manuallyAttachedFiles.length - validManualFiles.length;
-        console.warn(`⚠️ STREAMING CHATBOX: ${filteredCount} manually attached files were filtered out due to blacklisting`);
-      }
     } else {
       console.log('🚨 STREAMING CHATBOX: No manually attached files to include');
     }
 
     // Priority 2: Files from current message processing (variable processor determined)
     if (this.currentMessageFiles && this.currentMessageFiles.length > 0) {
-      console.log('🚨 STREAMING CHATBOX: Processing current message files:', this.currentMessageFiles.length);
-      console.log('🚨 STREAMING CHATBOX: Raw current message files:',
-        this.currentMessageFiles.map(f => ({ name: f.name, fileId: f.geminiUri?.split('/').pop() }))
-      );
-
-      let addedFromCurrentMessage = 0;
-      let skippedBlacklisted = 0;
-
-      // Filter blacklisted files only (allow duplicates unless blacklisted)
+      // Avoid duplicates
       for (const file of this.currentMessageFiles) {
-        // Check if blacklisted
-        if (file.geminiUri) {
-          const fileId = file.geminiUri.split('/').pop();
-          if (this.blacklistedFileIds && this.blacklistedFileIds.has(fileId)) {
-            console.warn('🚫 STREAMING CHATBOX: Skipping blacklisted current message file:', file.name, fileId);
-            skippedBlacklisted++;
-            continue;
-          }
-
-          // CRITICAL FIX: Don't prevent duplicates unless blacklisted
-          // Allow files to exist in multiple places - API handles duplicates gracefully
-          console.log('✅ STREAMING CHATBOX: Including current message file:', file.name, fileId);
+        const alreadyIncluded = knowledgeBaseFiles.some(existing =>
+          existing.geminiUri === file.geminiUri || existing.name === file.name
+        );
+        if (!alreadyIncluded) {
+          knowledgeBaseFiles.push(file);
         }
-
-        // File passed blacklist check, add it
-        knowledgeBaseFiles.push(file);
-        addedFromCurrentMessage++;
       }
-
-      console.log(`🚨 STREAMING CHATBOX: Current message files summary: ${addedFromCurrentMessage} added, ${skippedBlacklisted} blacklisted`);
+      console.log('aiFiverr StreamingChatbox: Including message-specific files:', this.currentMessageFiles.length);
     }
 
     // REMOVED: No longer automatically include all knowledge base files
     console.log('aiFiverr StreamingChatbox: Total files to include:', knowledgeBaseFiles.length);
 
-    // Validate files before adding them to the API call
-    if (knowledgeBaseFiles.length > 0) {
-      console.log('🔍 STREAMING CHATBOX: Validating files before API call...');
-      console.log('🔍 STREAMING CHATBOX: Files before validation:', knowledgeBaseFiles.map(f => ({
-        name: f.name,
-        geminiUri: f.geminiUri,
-        fileId: f.geminiUri ? f.geminiUri.split('/').pop() : 'no-uri'
-      })));
-
-      const originalFileCount = knowledgeBaseFiles.length;
-      knowledgeBaseFiles = await this.validateFilesBeforeAPICall(knowledgeBaseFiles);
-
-      console.log('✅ STREAMING CHATBOX: File validation complete. Valid files:', knowledgeBaseFiles.length);
-
-      if (knowledgeBaseFiles.length === 0 && originalFileCount > 0) {
-        console.warn('⚠️ STREAMING CHATBOX: All files were filtered out during validation. Proceeding without files.');
-        console.warn('⚠️ STREAMING CHATBOX: This may result in responses without file context.');
-      } else if (knowledgeBaseFiles.length > 0) {
-        console.log('✅ STREAMING CHATBOX: Valid files:', knowledgeBaseFiles.map(f => ({
-          name: f.name,
-          geminiUri: f.geminiUri,
-          fileId: f.geminiUri ? f.geminiUri.split('/').pop() : 'no-uri'
-        })));
-      }
-    }
-
     // Add files to the last user message if available
     if (knowledgeBaseFiles.length > 0 && contents.length > 0) {
       const lastUserMessage = contents[contents.length - 1];
       if (lastUserMessage.role === 'user') {
-
-        // Add all knowledge base files to the last user message
-        // Don't prevent duplicates here - let the API handle them gracefully
-        let addedNewFiles = 0;
-
         for (const file of knowledgeBaseFiles) {
           if (file.geminiUri) {
-            const fileId = file.geminiUri.split('/').pop();
-
-            // Only skip if file is blacklisted
-            if (this.blacklistedFileIds && this.blacklistedFileIds.has(fileId)) {
-              console.warn('🚫 STREAMING CHATBOX: Skipping blacklisted file in last message:', file.name, fileId);
-              continue;
-            }
-
             lastUserMessage.parts.unshift({
               fileData: {
                 fileUri: file.geminiUri,
                 mimeType: file.mimeType || 'text/plain'
               }
             });
-            console.log('✅ STREAMING CHATBOX: Added file to last message:', {
-              name: file.name,
-              geminiUri: file.geminiUri,
-              mimeType: file.mimeType,
-              fileId: fileId,
-              size: file.size || 'unknown',
-              lastModified: file.lastModified || 'unknown'
-            });
-            addedNewFiles++;
+            console.log('aiFiverr StreamingChatbox: Added file to message:', file.name);
           }
         }
-
-        console.log(`🔍 STREAMING CHATBOX: Added ${addedNewFiles} files to last message`);
       }
     }
 
@@ -1370,74 +1322,6 @@ class StreamingChatbox {
         candidateCount: 1
       }
     };
-
-    // DEBUG: Log all file references in the payload
-    console.log('🔍 STREAMING CHATBOX: Debugging payload files...');
-    let totalFileCount = 0;
-    const allFileIds = [];
-    const fileSourceMap = new Map(); // Track where each file came from
-
-    for (let i = 0; i < contents.length; i++) {
-      const message = contents[i];
-      if (message.parts) {
-        const fileRefs = message.parts.filter(part => part.fileData);
-        if (fileRefs.length > 0) {
-          totalFileCount += fileRefs.length;
-          const messageFileIds = fileRefs.map(ref => {
-            const fileId = ref.fileData.fileUri.split('/').pop();
-            allFileIds.push(fileId);
-
-            // Track source of this file
-            const source = i < this.conversationHistory.length ? 'conversation_history' : 'new_files';
-            if (fileSourceMap.has(fileId)) {
-              fileSourceMap.set(fileId, fileSourceMap.get(fileId) + `, ${source}_msg${i}`);
-            } else {
-              fileSourceMap.set(fileId, `${source}_msg${i}`);
-            }
-
-            return {
-              fileUri: ref.fileData.fileUri,
-              fileId: fileId,
-              mimeType: ref.fileData.mimeType,
-              source: source
-            };
-          });
-          console.log(`📄 Message ${i} (${message.role}): ${fileRefs.length} file references:`, messageFileIds);
-        }
-      }
-    }
-
-    console.log(`🔍 STREAMING CHATBOX: TOTAL FILES IN PAYLOAD: ${totalFileCount}`);
-    console.log(`🔍 STREAMING CHATBOX: ALL FILE IDs: [${allFileIds.join(', ')}]`);
-
-    // Show file source mapping
-    console.log('🔍 STREAMING CHATBOX: FILE SOURCE MAPPING:');
-    for (const [fileId, sources] of fileSourceMap.entries()) {
-      console.log(`  📄 ${fileId}: ${sources}`);
-    }
-
-    // Check for duplicates
-    const duplicateFiles = allFileIds.filter((id, index) => allFileIds.indexOf(id) !== index);
-    if (duplicateFiles.length > 0) {
-      console.warn('⚠️ STREAMING CHATBOX: DUPLICATE FILES DETECTED:', [...new Set(duplicateFiles)]);
-    }
-
-    // Check if any blacklisted files made it through
-    if (this.blacklistedFileIds && this.blacklistedFileIds.size > 0) {
-      console.log(`🔍 STREAMING CHATBOX: Current blacklist: [${Array.from(this.blacklistedFileIds).join(', ')}]`);
-      const blacklistedInPayload = allFileIds.filter(id => this.blacklistedFileIds.has(id));
-      if (blacklistedInPayload.length > 0) {
-        console.error('🚨 STREAMING CHATBOX: BLACKLISTED FILES FOUND IN PAYLOAD:', blacklistedInPayload);
-        // Show exactly where these blacklisted files came from
-        for (const fileId of blacklistedInPayload) {
-          console.error(`🚨   ${fileId} came from: ${fileSourceMap.get(fileId)}`);
-        }
-      } else {
-        console.log('✅ STREAMING CHATBOX: No blacklisted files in payload');
-      }
-    } else {
-      console.log('🔍 STREAMING CHATBOX: Blacklist is empty (no files have been blacklisted yet)');
-    }
 
     // Get model name
     let model = 'gemini-2.5-flash';
@@ -1470,88 +1354,6 @@ class StreamingChatbox {
       } catch (e) {
         // If we can't parse the error response, use the status text
       }
-
-      // CRITICAL FIX: Handle stale file references (403 errors)
-      if (response.status === 403 && errorMessage.includes('You do not have permission to access the File')) {
-        const fileIdMatch = errorMessage.match(/File (\w+)/);
-        const fileId = fileIdMatch ? fileIdMatch[1] : 'unknown';
-
-        console.error('🚨 STREAMING CHATBOX: FILE ACCESS ERROR DETECTED:', fileId);
-        console.error('🔧 SOLUTION: Attempting to continue without this specific file...');
-
-        // Debug blacklist before removal
-        console.log('🔍 STREAMING CHATBOX: Blacklist before file removal:');
-        console.log('  - blacklistedFileIds exists:', !!this.blacklistedFileIds);
-        console.log('  - blacklistedFileIds size:', this.blacklistedFileIds ? this.blacklistedFileIds.size : 'N/A');
-        console.log('  - current blacklist:', this.blacklistedFileIds ? Array.from(this.blacklistedFileIds) : 'N/A');
-
-        // Try to remove just this specific file and continue
-        console.log('🧹 STREAMING CHATBOX: Removing problematic file and retrying:', fileId);
-
-        try {
-          const removalSuccess = await this.removeSpecificFileFromCurrentRequest(fileId);
-
-          // Debug blacklist after removal
-          console.log('🔍 STREAMING CHATBOX: Blacklist after file removal:');
-          console.log('  - removal success:', removalSuccess);
-          console.log('  - blacklistedFileIds size:', this.blacklistedFileIds ? this.blacklistedFileIds.size : 'N/A');
-          console.log('  - current blacklist:', this.blacklistedFileIds ? Array.from(this.blacklistedFileIds) : 'N/A');
-          console.log('  - file in blacklist:', this.blacklistedFileIds ? this.blacklistedFileIds.has(fileId) : 'N/A');
-
-          if (!removalSuccess) {
-            console.warn('⚠️ STREAMING CHATBOX: File removal reported no success, but continuing with retry');
-          }
-
-          // Ensure file is definitely in blacklist
-          if (!this.blacklistedFileIds || !this.blacklistedFileIds.has(fileId)) {
-            console.warn('⚠️ STREAMING CHATBOX: File not in blacklist after removal, adding manually');
-            if (!this.blacklistedFileIds) {
-              this.blacklistedFileIds = new Set();
-            }
-            this.blacklistedFileIds.add(fileId);
-          }
-
-        } catch (removalError) {
-          console.error('❌ STREAMING CHATBOX: Error during file removal:', removalError);
-          // Still try to blacklist the file
-          if (!this.blacklistedFileIds) {
-            this.blacklistedFileIds = new Set();
-          }
-          this.blacklistedFileIds.add(fileId);
-          console.log('🚫 STREAMING CHATBOX: Added file to blacklist despite removal error:', fileId);
-        }
-
-        if (retryCount < 3) {
-          console.log(`🔄 STREAMING CHATBOX: Retrying without problematic file (attempt ${retryCount + 1}/3)...`);
-          // Retry the API call without the problematic file
-          return await this.streamWithFullContext(retryCount + 1);
-        } else {
-          console.error('🚨 STREAMING CHATBOX: Maximum retry attempts reached');
-          console.warn('🔄 STREAMING CHATBOX: Attempting fallback - continuing without ANY file attachments...');
-
-          // FALLBACK STRATEGY: Clear all files and try one more time
-          const originalManualFiles = this.manuallyAttachedFiles;
-          const originalMessageFiles = this.currentMessageFiles;
-
-          try {
-            // Temporarily clear all files
-            this.manuallyAttachedFiles = [];
-            this.currentMessageFiles = [];
-
-            console.log('🔄 STREAMING CHATBOX: Fallback attempt - no files attached');
-            return await this.streamWithFullContext(0); // Reset retry count for fallback
-
-          } catch (fallbackError) {
-            // Restore original files if fallback also fails
-            this.manuallyAttachedFiles = originalManualFiles;
-            this.currentMessageFiles = originalMessageFiles;
-
-            console.error('🚨 STREAMING CHATBOX: Fallback also failed');
-            throw new Error(`Unable to complete request. Both file-attached and file-free attempts failed. Original error: ${errorMessage}`);
-          }
-        }
-      }
-
       console.error('aiFiverr StreamingChatbox: API request failed:', errorMessage);
       throw new Error(errorMessage);
     }
@@ -2728,306 +2530,8 @@ class StreamingChatbox {
    */
   clearConversation() {
     this.conversationHistory = [];
-    this.blacklistedFileIds = new Set(); // Clear blacklist when clearing conversation
     this.messagesContainer.innerHTML = '';
     this.updateStatus('Conversation cleared', 'success');
-  }
-
-  /**
-   * Clear blacklisted file IDs (useful for debugging or manual recovery)
-   */
-  clearBlacklistedFiles() {
-    const count = this.blacklistedFileIds ? this.blacklistedFileIds.size : 0;
-    this.blacklistedFileIds = new Set();
-    console.log(`🧹 STREAMING CHATBOX: Cleared ${count} blacklisted file IDs`);
-    return count;
-  }
-
-  /**
-   * Validate files before making API calls
-   * Filters out expired, invalid, or problematic files
-   */
-  async validateFilesBeforeAPICall(files) {
-    // CRITICAL FIX: Ensure blacklist is properly initialized
-    if (!this.blacklistedFileIds || !(this.blacklistedFileIds instanceof Set)) {
-      console.warn('⚠️ STREAMING CHATBOX: Blacklist not properly initialized in validation, creating new Set');
-      this.blacklistedFileIds = new Set();
-    }
-
-    const validFiles = [];
-
-    for (const file of files) {
-      try {
-        // Check required properties
-        if (!file.geminiUri || !file.name) {
-          console.warn('🚫 STREAMING CHATBOX: File missing required properties, skipping:', file.name || 'unknown');
-          continue;
-        }
-
-        // Validate URI format
-        if (!file.geminiUri.startsWith('https://generativelanguage.googleapis.com/v1beta/files/')) {
-          console.warn('🚫 STREAMING CHATBOX: Invalid file URI format, skipping:', file.name, file.geminiUri);
-          continue;
-        }
-
-        // Extract file ID for additional validation
-        const fileId = file.geminiUri.split('/').pop();
-
-        // CRITICAL FIX: Check blacklist first
-        if (this.blacklistedFileIds && this.blacklistedFileIds.has(fileId)) {
-          console.warn('🚫 STREAMING CHATBOX: File is blacklisted (previously caused 403 error), skipping:', file.name, fileId);
-          continue;
-        }
-
-        // Only filter out files with extremely suspicious IDs (too short)
-        if (fileId.length < 8) {
-          console.warn('🚫 STREAMING CHATBOX: Invalid file ID detected, skipping:', fileId, file.name);
-          continue;
-        }
-
-        // Check expiration using knowledge base manager if available
-        if (window.knowledgeBaseManager && window.knowledgeBaseManager.isFileExpired) {
-          if (window.knowledgeBaseManager.isFileExpired(file)) {
-            console.warn('🚫 STREAMING CHATBOX: File expired, skipping:', file.name);
-            continue;
-          }
-        }
-
-        // File passed all validations
-        validFiles.push(file);
-        console.log('✅ STREAMING CHATBOX: File validated successfully:', file.name);
-
-      } catch (error) {
-        console.error('❌ STREAMING CHATBOX: Error validating file:', file.name, error);
-        // Skip this file and continue with others
-      }
-    }
-
-    return validFiles;
-  }
-
-  /**
-   * Remove a specific file from the current request only (less aggressive than full cleanup)
-   */
-  async removeSpecificFileFromCurrentRequest(fileId) {
-    console.log('🗑️ STREAMING CHATBOX: Removing specific file from current request:', fileId);
-
-    // CRITICAL FIX: Ensure blacklist is properly initialized
-    if (!this.blacklistedFileIds || !(this.blacklistedFileIds instanceof Set)) {
-      console.warn('⚠️ STREAMING CHATBOX: Blacklist not properly initialized, creating new Set');
-      this.blacklistedFileIds = new Set();
-    }
-
-    let removedCount = 0;
-
-    // Remove from manually attached files for this session
-    if (this.manuallyAttachedFiles && Array.isArray(this.manuallyAttachedFiles)) {
-      const originalLength = this.manuallyAttachedFiles.length;
-      this.manuallyAttachedFiles = this.manuallyAttachedFiles.filter(file => {
-        if (file.geminiUri) {
-          const partFileId = file.geminiUri.split('/').pop();
-          if (partFileId === fileId) {
-            console.log('🗑️ STREAMING CHATBOX: Removed file from manually attached files:', partFileId, file.name);
-            return false;
-          }
-        }
-        return true;
-      });
-
-      if (this.manuallyAttachedFiles.length < originalLength) {
-        removedCount++;
-      }
-    }
-
-    // Remove from current message files
-    if (this.currentMessageFiles && Array.isArray(this.currentMessageFiles)) {
-      const originalLength = this.currentMessageFiles.length;
-      this.currentMessageFiles = this.currentMessageFiles.filter(file => {
-        if (file.geminiUri) {
-          const partFileId = file.geminiUri.split('/').pop();
-          if (partFileId === fileId) {
-            console.log('🗑️ STREAMING CHATBOX: Removed file from current message files:', partFileId, file.name);
-            return false;
-          }
-        }
-        return true;
-      });
-
-      if (this.currentMessageFiles.length < originalLength) {
-        removedCount++;
-      }
-    }
-
-    // CRITICAL FIX: Remove from conversation history where files are actually stored for API calls
-    if (this.conversationHistory && Array.isArray(this.conversationHistory)) {
-      for (const message of this.conversationHistory) {
-        if (message.parts && Array.isArray(message.parts)) {
-          const originalLength = message.parts.length;
-          message.parts = message.parts.filter(part => {
-            if (part.fileData && part.fileData.fileUri) {
-              const partFileId = part.fileData.fileUri.split('/').pop();
-              if (partFileId === fileId) {
-                console.log('🗑️ STREAMING CHATBOX: Removed file from conversation history:', partFileId);
-                return false;
-              }
-            }
-            return true;
-          });
-
-          if (message.parts.length < originalLength) {
-            removedCount++;
-          }
-        }
-      }
-    }
-
-    // CRITICAL FIX: Add file to blacklist to prevent re-inclusion
-    if (!this.blacklistedFileIds) {
-      this.blacklistedFileIds = new Set();
-    }
-    this.blacklistedFileIds.add(fileId);
-    console.log('🚫 STREAMING CHATBOX: Added file to blacklist:', fileId);
-
-    console.log(`🗑️ STREAMING CHATBOX: Removed ${removedCount} references to file ${fileId} from current request`);
-    return removedCount > 0;
-  }
-
-  /**
-   * Clean up stale file references from all relevant locations
-   */
-  async cleanupStaleFileReference(fileId) {
-    console.log('🧹 STREAMING CHATBOX: Attempting to clean up stale file reference:', fileId);
-
-    let cleanedCount = 0;
-
-    // FIRST: Clean up from knowledge base manager if available
-    if (window.knowledgeBaseManager && window.knowledgeBaseManager.removeFileByGeminiUri) {
-      try {
-        const geminiUri = `https://generativelanguage.googleapis.com/v1beta/files/${fileId}`;
-        const kbCleanupResult = await window.knowledgeBaseManager.removeFileByGeminiUri(geminiUri);
-        if (kbCleanupResult) {
-          console.log('🗑️ STREAMING CHATBOX: Removed stale file from knowledge base manager:', fileId);
-          cleanedCount++;
-        }
-      } catch (error) {
-        console.warn('⚠️ STREAMING CHATBOX: Could not clean from knowledge base manager:', error);
-      }
-    }
-
-    // Clean up manually attached files
-    if (this.manuallyAttachedFiles && Array.isArray(this.manuallyAttachedFiles)) {
-      const originalLength = this.manuallyAttachedFiles.length;
-      this.manuallyAttachedFiles = this.manuallyAttachedFiles.filter(file => {
-        if (file.geminiUri) {
-          const partFileId = file.geminiUri.split('/').pop();
-          if (partFileId === fileId) {
-            console.log('🗑️ STREAMING CHATBOX: Removed stale file from manually attached files:', partFileId);
-            return false;
-          }
-        }
-        return true;
-      });
-
-      if (this.manuallyAttachedFiles.length < originalLength) {
-        cleanedCount++;
-        console.log('✅ STREAMING CHATBOX: Cleaned stale file from manually attached files');
-      }
-    }
-
-    // Clean up current message files
-    if (this.currentMessageFiles && Array.isArray(this.currentMessageFiles)) {
-      const originalLength = this.currentMessageFiles.length;
-      this.currentMessageFiles = this.currentMessageFiles.filter(file => {
-        if (file.geminiUri) {
-          const partFileId = file.geminiUri.split('/').pop();
-          if (partFileId === fileId) {
-            console.log('🗑️ STREAMING CHATBOX: Removed stale file from current message files:', partFileId);
-            return false;
-          }
-        }
-        return true;
-      });
-
-      if (this.currentMessageFiles.length < originalLength) {
-        cleanedCount++;
-        console.log('✅ STREAMING CHATBOX: Cleaned stale file from current message files');
-      }
-    }
-
-    // Clean up conversation history to remove stale file references
-    if (this.conversationHistory && Array.isArray(this.conversationHistory)) {
-      for (const message of this.conversationHistory) {
-        if (message.parts && Array.isArray(message.parts)) {
-          const originalLength = message.parts.length;
-          message.parts = message.parts.filter(part => {
-            if (part.fileData && part.fileData.fileUri) {
-              const partFileId = part.fileData.fileUri.split('/').pop();
-              if (partFileId === fileId) {
-                console.log('🗑️ STREAMING CHATBOX: Removed stale file from conversation history:', partFileId);
-                return false;
-              }
-            }
-            return true;
-          });
-
-          if (message.parts.length < originalLength) {
-            cleanedCount++;
-          }
-        }
-      }
-
-      if (cleanedCount > 0) {
-        console.log('✅ STREAMING CHATBOX: Cleaned stale file references from conversation history');
-      }
-    }
-
-    // FINAL: Clean up from text selector sources if available
-    if (window.textSelector) {
-      try {
-        // Clean from lastKnowledgeBaseFiles
-        if (window.textSelector.lastKnowledgeBaseFiles && Array.isArray(window.textSelector.lastKnowledgeBaseFiles)) {
-          const originalLength = window.textSelector.lastKnowledgeBaseFiles.length;
-          window.textSelector.lastKnowledgeBaseFiles = window.textSelector.lastKnowledgeBaseFiles.filter(file => {
-            if (file.geminiUri) {
-              const partFileId = file.geminiUri.split('/').pop();
-              if (partFileId === fileId) {
-                console.log('🗑️ STREAMING CHATBOX: Removed stale file from text selector lastKnowledgeBaseFiles:', partFileId);
-                return false;
-              }
-            }
-            return true;
-          });
-
-          if (window.textSelector.lastKnowledgeBaseFiles.length < originalLength) {
-            cleanedCount++;
-          }
-        }
-
-        // Clean from attachedFiles
-        if (window.textSelector.attachedFiles && Array.isArray(window.textSelector.attachedFiles)) {
-          const originalLength = window.textSelector.attachedFiles.length;
-          window.textSelector.attachedFiles = window.textSelector.attachedFiles.filter(file => {
-            if (file.geminiUri) {
-              const partFileId = file.geminiUri.split('/').pop();
-              if (partFileId === fileId) {
-                console.log('🗑️ STREAMING CHATBOX: Removed stale file from text selector attachedFiles:', partFileId);
-                return false;
-              }
-            }
-            return true;
-          });
-
-          if (window.textSelector.attachedFiles.length < originalLength) {
-            cleanedCount++;
-          }
-        }
-      } catch (error) {
-        console.warn('⚠️ STREAMING CHATBOX: Could not clean from text selector:', error);
-      }
-    }
-
-    console.log(`🧹 STREAMING CHATBOX: Cleanup complete. Removed ${cleanedCount} stale file references.`);
-    return cleanedCount > 0;
   }
 
   /**
@@ -3037,7 +2541,7 @@ class StreamingChatbox {
     if (this.chatboxElement) {
       this.chatboxElement.remove();
     }
-
+    
     // Remove styles if no other chatboxes exist
     const existingChatboxes = document.querySelectorAll('.aifiverr-streaming-chatbox');
     if (existingChatboxes.length === 0) {
