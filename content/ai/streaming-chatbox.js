@@ -31,6 +31,19 @@ class StreamingChatbox {
     this.originalVariableUsage = null; // Stores which variables were used in original prompt
     this.manuallyAttachedFiles = []; // Stores manually attached files
 
+    // NEW: File access validation and error handling
+    this.suspiciousFileIds = new Set([
+      'wrpdb7uq3ddk',  // Original problematic file
+      '46vm361k1btt'   // portfolio.md file causing 403 permission errors
+    ]);
+    this.validatedFiles = new Map(); // Cache for file validation results
+    this.fileValidationPromises = new Map(); // Prevent duplicate validation requests
+
+    // NEW: Transition state management
+    this.isTransitioning = false;
+    this.transitionStartTime = null;
+    this.maxTransitionTime = 10000; // 10 seconds timeout
+
     this.init();
   }
 
@@ -699,6 +712,213 @@ class StreamingChatbox {
   }
 
   /**
+   * Validate file accessibility before including in API requests
+   * @param {Array} files - Array of file objects to validate
+   * @returns {Promise<Array>} - Array of accessible files
+   */
+  async validateFileAccessibility(files) {
+    if (!files || files.length === 0) {
+      return [];
+    }
+
+    const validFiles = [];
+    const inaccessibleFiles = [];
+
+    for (const file of files) {
+      try {
+        // Check if file is in suspicious list
+        if (this.suspiciousFileIds.has(file.geminiUri?.split('/').pop() || file.id)) {
+          console.warn('aiFiverr StreamingChatbox: Skipping suspicious file:', file.name, file.geminiUri);
+          inaccessibleFiles.push({
+            ...file,
+            error: 'File is known to be inaccessible (expired or API key mismatch)'
+          });
+          continue;
+        }
+
+        // Check cache first
+        const cacheKey = file.geminiUri || file.id;
+        if (this.validatedFiles.has(cacheKey)) {
+          const cachedResult = this.validatedFiles.get(cacheKey);
+          if (cachedResult.isValid) {
+            validFiles.push(file);
+          } else {
+            inaccessibleFiles.push({
+              ...file,
+              error: cachedResult.error
+            });
+          }
+          continue;
+        }
+
+        // Prevent duplicate validation requests
+        if (this.fileValidationPromises.has(cacheKey)) {
+          const result = await this.fileValidationPromises.get(cacheKey);
+          if (result.isValid) {
+            validFiles.push(file);
+          } else {
+            inaccessibleFiles.push({
+              ...file,
+              error: result.error
+            });
+          }
+          continue;
+        }
+
+        // Perform actual validation
+        const validationPromise = this.validateSingleFile(file);
+        this.fileValidationPromises.set(cacheKey, validationPromise);
+
+        const result = await validationPromise;
+        this.validatedFiles.set(cacheKey, result);
+        this.fileValidationPromises.delete(cacheKey);
+
+        if (result.isValid) {
+          validFiles.push(file);
+        } else {
+          inaccessibleFiles.push({
+            ...file,
+            error: result.error
+          });
+        }
+
+      } catch (error) {
+        console.error('aiFiverr StreamingChatbox: File validation error:', error);
+        inaccessibleFiles.push({
+          ...file,
+          error: `Validation failed: ${error.message}`
+        });
+      }
+    }
+
+    // Log results
+    if (inaccessibleFiles.length > 0) {
+      console.warn('aiFiverr StreamingChatbox: Inaccessible files found:',
+        inaccessibleFiles.map(f => ({ name: f.name, error: f.error })));
+
+      // Show user-friendly notification about inaccessible files
+      this.showFileAccessWarning(inaccessibleFiles);
+    }
+
+    console.log('aiFiverr StreamingChatbox: File validation complete:', {
+      total: files.length,
+      valid: validFiles.length,
+      invalid: inaccessibleFiles.length
+    });
+
+    return validFiles;
+  }
+
+  /**
+   * Validate a single file's accessibility
+   * @param {Object} file - File object to validate
+   * @returns {Promise<Object>} - Validation result
+   */
+  async validateSingleFile(file) {
+    try {
+      if (!file.geminiUri) {
+        return {
+          isValid: false,
+          error: 'No Gemini URI provided'
+        };
+      }
+
+      // Get API key for validation
+      let apiKey;
+      try {
+        if (window.apiKeyManager && window.apiKeyManager.initialized) {
+          const keyData = window.apiKeyManager.getKeyForSession('streaming_chat');
+          apiKey = keyData ? keyData.key : null;
+        }
+
+        if (!apiKey && window.enhancedGeminiClient) {
+          apiKey = await window.enhancedGeminiClient.getApiKey();
+        }
+
+        if (!apiKey) {
+          return {
+            isValid: false,
+            error: 'No API key available for validation'
+          };
+        }
+      } catch (error) {
+        return {
+          isValid: false,
+          error: `API key retrieval failed: ${error.message}`
+        };
+      }
+
+      // Make a lightweight request to check file accessibility
+      const fileId = file.geminiUri.split('/').pop();
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/files/${fileId}?key=${apiKey}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        return {
+          isValid: true,
+          error: null
+        };
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        let errorMessage = `HTTP ${response.status}`;
+
+        if (response.status === 403) {
+          errorMessage = 'File access forbidden (expired or API key mismatch)';
+        } else if (response.status === 404) {
+          errorMessage = 'File not found or deleted';
+        } else if (errorData.error?.message) {
+          errorMessage = errorData.error.message;
+        }
+
+        // Add to suspicious files if it's a permission error
+        if (response.status === 403) {
+          this.suspiciousFileIds.add(fileId);
+        }
+
+        return {
+          isValid: false,
+          error: errorMessage
+        };
+      }
+
+    } catch (error) {
+      return {
+        isValid: false,
+        error: `Network error: ${error.message}`
+      };
+    }
+  }
+
+  /**
+   * Show user-friendly warning about inaccessible files
+   * @param {Array} inaccessibleFiles - Array of inaccessible file objects
+   */
+  showFileAccessWarning(inaccessibleFiles) {
+    const fileNames = inaccessibleFiles.map(f => f.name).join(', ');
+    const warningMessage = `⚠️ Some files are no longer accessible: ${fileNames}. This usually means they have expired (48-hour limit) or were uploaded with a different API key. The conversation will continue with available files only.`;
+
+    // Show warning in the chat
+    if (this.messagesContainer) {
+      const warningDiv = document.createElement('div');
+      warningDiv.className = 'chatbox-warning-message';
+      warningDiv.innerHTML = `
+        <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 12px; margin: 8px 0; color: #856404;">
+          <strong>File Access Warning:</strong><br>
+          ${warningMessage}
+          <br><br>
+          <small>💡 <strong>To fix this:</strong> Please refresh or re-upload the files in your Knowledge Base and try again.</small>
+        </div>
+      `;
+      this.messagesContainer.appendChild(warningDiv);
+      this.scrollToBottom();
+    }
+  }
+
+  /**
    * Set original variable usage pattern
    * @param {Array} usedVariables - Variables that were used in the original prompt
    */
@@ -754,7 +974,71 @@ class StreamingChatbox {
       console.log('aiFiverr StreamingChatbox: Cleared API key session');
     }
 
+    // Clear file validation cache and reset suspicious files to defaults
+    this.validatedFiles.clear();
+    this.fileValidationPromises.clear();
+    this.suspiciousFileIds = new Set([
+      'wrpdb7uq3ddk',  // Original problematic file
+      '46vm361k1btt'   // portfolio.md file causing 403 permission errors
+    ]);
+
+    // Reset transition state
+    this.isTransitioning = false;
+    this.transitionStartTime = null;
+
+    this.updateStatus('New session started', 'success');
     console.log('aiFiverr StreamingChatbox: New session started - all context cleared');
+  }
+
+  /**
+   * Refresh file access and clear suspicious files list
+   * This can be called when user wants to retry with files that were previously inaccessible
+   */
+  refreshFileAccess() {
+    console.log('aiFiverr StreamingChatbox: Refreshing file access validation');
+
+    // Clear all validation caches
+    this.validatedFiles.clear();
+    this.fileValidationPromises.clear();
+
+    // Reset suspicious files to minimal set (keep known problematic ones)
+    this.suspiciousFileIds = new Set([
+      'wrpdb7uq3ddk',  // Original problematic file
+      '46vm361k1btt'   // portfolio.md file causing 403 permission errors
+    ]);
+
+    // Show success message
+    this.updateStatus('File access refreshed - you can now retry with previously inaccessible files', 'success');
+
+    console.log('aiFiverr StreamingChatbox: File access validation refreshed');
+  }
+
+  /**
+   * Check if a file ID is in the suspicious files list
+   * @param {string} fileId - The file ID to check
+   * @returns {boolean} - True if the file is suspicious
+   */
+  isFileSuspicious(fileId) {
+    return this.suspiciousFileIds.has(fileId);
+  }
+
+  /**
+   * Add a file ID to the suspicious files list
+   * @param {string} fileId - The file ID to add
+   */
+  markFileAsSuspicious(fileId) {
+    this.suspiciousFileIds.add(fileId);
+    console.log('aiFiverr StreamingChatbox: Marked file as suspicious:', fileId);
+  }
+
+  /**
+   * Remove a file ID from the suspicious files list (for retry scenarios)
+   * @param {string} fileId - The file ID to remove
+   */
+  clearFileSuspicion(fileId) {
+    this.suspiciousFileIds.delete(fileId);
+    this.validatedFiles.delete(fileId);
+    console.log('aiFiverr StreamingChatbox: Cleared suspicion for file:', fileId);
   }
 
   /**
@@ -1181,8 +1465,19 @@ class StreamingChatbox {
       console.log('aiFiverr StreamingChatbox: Including message-specific files:', this.currentMessageFiles.length);
     }
 
-    // REMOVED: No longer automatically include all knowledge base files
-    console.log('aiFiverr StreamingChatbox: Total files to include:', knowledgeBaseFiles.length);
+    console.log('aiFiverr StreamingChatbox: Total files before validation:', knowledgeBaseFiles.length);
+
+    // NEW: Validate file accessibility before including in API request
+    if (knowledgeBaseFiles.length > 0) {
+      try {
+        knowledgeBaseFiles = await this.validateFileAccessibility(knowledgeBaseFiles);
+        console.log('aiFiverr StreamingChatbox: Files after validation:', knowledgeBaseFiles.length);
+      } catch (error) {
+        console.error('aiFiverr StreamingChatbox: File validation failed:', error);
+        // Continue with original files if validation fails
+        console.log('aiFiverr StreamingChatbox: Continuing with unvalidated files due to validation error');
+      }
+    }
 
     // Add files to the last user message if available
     if (knowledgeBaseFiles.length > 0 && contents.length > 0) {
@@ -1898,12 +2193,27 @@ class StreamingChatbox {
       if (contentDiv) {
         let errorMessage = '❌ Error: ';
 
-        // Provide more specific error messages
-        if (error.message.includes('API key')) {
+        // FIXED: Check for file access errors FIRST to prevent API key confusion
+        if (error.message.includes('File access error:') || error.message.includes('no longer accessible')) {
+          // File permission errors should display as-is with proper context
+          errorMessage += error.message.replace('File access error: ', '');
+        } else if (error.message.includes('You do not have permission to access the File') ||
+                   (error.message.includes('403') && error.message.includes('File'))) {
+          // Handle specific file permission errors from API
+          const fileIdMatch = error.message.match(/File (\w+)/);
+          const fileId = fileIdMatch ? fileIdMatch[1] : 'unknown';
+
+          // Add to suspicious files list
+          this.suspiciousFileIds.add(fileId);
+
+          errorMessage += `File access denied (ID: ${fileId}). This usually means the file has expired (48-hour limit) or was uploaded with a different API key. Please refresh or re-upload the file in your Knowledge Base and try again.`;
+        } else if (error.message.includes('No API key available') || error.message.includes('Failed to retrieve API key')) {
+          // Only show API key configuration error for actual API key issues
           errorMessage += 'API key not configured. Please set up your Gemini API key in the extension settings.';
         } else if (error.message.includes('401')) {
           errorMessage += 'Invalid API key. Please check your Gemini API key in the extension settings.';
-        } else if (error.message.includes('403')) {
+        } else if (error.message.includes('403') && !error.message.includes('File access error')) {
+          // Only show generic 403 message if it's NOT a file permission error
           errorMessage += 'API access forbidden. Please check your API key permissions.';
         } else if (error.message.includes('429')) {
           errorMessage += 'Rate limit exceeded. Please wait a moment and try again.';

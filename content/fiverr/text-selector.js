@@ -2031,10 +2031,23 @@ class TextSelector {
     console.log('aiFiverr: Chat button found:', continueBtn);
 
     if (continueBtn) {
+      // Add debouncing to prevent multiple rapid clicks
+      let isTransitioning = false;
+
       continueBtn.addEventListener('click', async (event) => {
         console.log('aiFiverr: Chat button clicked!', event);
         event.preventDefault();
         event.stopPropagation();
+
+        // Prevent multiple simultaneous transitions
+        if (isTransitioning) {
+          console.log('aiFiverr: Transition already in progress, ignoring click');
+          return;
+        }
+
+        isTransitioning = true;
+        continueBtn.disabled = true;
+        continueBtn.textContent = '💬 Opening...';
 
         const isEditing = textarea.style.display !== 'none';
         const currentText = isEditing ? textarea.value : (popup.dataset.currentText || result);
@@ -2042,26 +2055,43 @@ class TextSelector {
 
         console.log('aiFiverr: Chat clicked', { currentText, originalSelectedText });
 
-      try {
-        // Check if StreamingChatbox is available
-        if (typeof window.StreamingChatbox === 'undefined') {
-          console.error('aiFiverr: StreamingChatbox not available, keeping popup open');
-          this.showToast('Streaming chat not available. Please try again.');
-          return;
-        }
+        try {
+          // Check if StreamingChatbox is available
+          if (typeof window.StreamingChatbox === 'undefined') {
+            console.error('aiFiverr: StreamingChatbox not available, keeping popup open');
+            this.showToast('Streaming chat not available. Please try again.');
+            return;
+          }
 
-        // Show streaming chatbox with conversation context (this will handle popup closing internally)
-        const success = await this.showStreamingChatbox(currentText, originalSelectedText);
+          // Validate context before transition
+          const contextValidation = this.validateTransitionContext(currentText, originalSelectedText);
+          if (!contextValidation.isValid) {
+            console.error('aiFiverr: Context validation failed:', contextValidation.error);
+            this.showToast(`Cannot transition to chat: ${contextValidation.error}`);
+            return;
+          }
 
-        // Only close popup if chatbox opened successfully
-        if (success) {
-          this.closeResultPopup(popup);
+          // Show streaming chatbox with conversation context
+          const success = await this.showStreamingChatbox(currentText, originalSelectedText);
+
+          // Only close popup if chatbox opened successfully
+          if (success) {
+            console.log('aiFiverr: Streaming chatbox opened successfully, closing popup');
+            this.closeResultPopup(popup);
+          } else {
+            console.error('aiFiverr: Failed to open streaming chatbox, keeping popup open');
+            this.showToast('Failed to open streaming chat. Please try again.');
+          }
+        } catch (error) {
+          console.error('aiFiverr: Error opening streaming chatbox:', error);
+          this.showToast('Error opening chat. Please try again.');
+        } finally {
+          // Reset button state
+          isTransitioning = false;
+          continueBtn.disabled = false;
+          continueBtn.textContent = '💬 Chat';
         }
-      } catch (error) {
-        console.error('aiFiverr: Error opening streaming chatbox:', error);
-        this.showToast('Error opening chat. Please try again.');
-      }
-    });
+      });
     } else {
       console.error('aiFiverr: Chat button not found in popup!');
     }
@@ -3292,6 +3322,53 @@ class TextSelector {
   }
 
   /**
+   * Validate context before transitioning to streaming chat
+   * @param {string} currentText - The current AI result text
+   * @param {string} originalText - The original selected text
+   * @returns {Object} - Validation result with isValid and error properties
+   */
+  validateTransitionContext(currentText, originalText) {
+    // Check if we have the essential content
+    if (!currentText || currentText.trim().length === 0) {
+      return {
+        isValid: false,
+        error: 'No AI result content to transfer'
+      };
+    }
+
+    if (!originalText || originalText.trim().length === 0) {
+      return {
+        isValid: false,
+        error: 'No original text context available'
+      };
+    }
+
+    // Check if context data is available
+    if (!this.lastProcessedContext && !this.lastUsedVariables) {
+      console.warn('aiFiverr: No processed context available for transition');
+      // This is not a fatal error, but log it for debugging
+    }
+
+    // Validate manually attached files if any
+    const manuallyAttachedFiles = this.getManuallyAttachedFiles();
+    if (manuallyAttachedFiles && manuallyAttachedFiles.length > 0) {
+      const invalidFiles = manuallyAttachedFiles.filter(file =>
+        !file.geminiUri || !file.name
+      );
+
+      if (invalidFiles.length > 0) {
+        console.warn('aiFiverr: Some manually attached files are invalid:', invalidFiles);
+        // Continue anyway, but log the issue
+      }
+    }
+
+    return {
+      isValid: true,
+      error: null
+    };
+  }
+
+  /**
    * Show streaming chatbox with AI result and enable continuous conversation
    * @param {string} initialResult - The AI response text
    * @param {string} originalText - The original selected text
@@ -3301,6 +3378,10 @@ class TextSelector {
     console.log('aiFiverr: Showing streaming chatbox with initial result', { initialResult, originalText });
 
     try {
+      // Set transition state
+      const transitionStartTime = Date.now();
+      const maxTransitionTime = 10000; // 10 seconds timeout
+
       // Create or get existing chatbox instance
       if (!this.streamingChatbox) {
         // Check if StreamingChatbox class is available
@@ -3319,19 +3400,43 @@ class TextSelector {
           enableDragging: true,
           enableResizing: true
         });
+
+        // Check if creation was successful
+        if (!this.streamingChatbox || !this.streamingChatbox.chatboxElement) {
+          console.error('aiFiverr: Failed to create StreamingChatbox instance');
+          return false;
+        }
       }
 
-      // NEW: Set original context for consistent variable usage
+      // NEW: Enhanced context preservation with validation
+      console.log('aiFiverr: Transferring context to streaming chatbox...');
+
+      // Set original context for consistent variable usage
       if (this.lastProcessedContext) {
         this.streamingChatbox.setOriginalContext(this.lastProcessedContext);
+        console.log('aiFiverr: Original context transferred:', Object.keys(this.lastProcessedContext));
+      } else {
+        console.warn('aiFiverr: No lastProcessedContext available for transfer');
       }
 
       if (this.lastUsedVariables) {
         this.streamingChatbox.setOriginalVariableUsage(this.lastUsedVariables);
+        console.log('aiFiverr: Original variables transferred:', this.lastUsedVariables);
+      } else {
+        console.warn('aiFiverr: No lastUsedVariables available for transfer');
       }
 
+      // Transfer manually attached files with validation
       const manuallyAttachedFiles = this.getManuallyAttachedFiles();
-      this.streamingChatbox.setManuallyAttachedFiles(manuallyAttachedFiles);
+      if (manuallyAttachedFiles && manuallyAttachedFiles.length > 0) {
+        console.log('aiFiverr: Transferring manually attached files:', manuallyAttachedFiles.length);
+        this.streamingChatbox.setManuallyAttachedFiles(manuallyAttachedFiles);
+      } else {
+        console.log('aiFiverr: No manually attached files to transfer');
+      }
+
+      // NEW: Ensure API key session consistency
+      await this.ensureAPIKeySessionConsistency();
 
       // Clear any existing conversation history and UI messages
       this.streamingChatbox.conversationHistory = [];
@@ -3383,22 +3488,79 @@ class TextSelector {
         parts: [{ text: initialResult }]
       });
 
-      // Show the chatbox first
-      this.streamingChatbox.show();
+      // Verify chatbox is actually visible before proceeding
+      if (!this.streamingChatbox.isVisible) {
+        console.error('aiFiverr: Streaming chatbox failed to show');
+        return false;
+      }
 
       // Add the initial messages to the UI (display the original text for user, AI result as-is)
       this.streamingChatbox.addMessage('user', originalText);
       this.streamingChatbox.addMessage('assistant', initialResult);
 
-      // Hide the floating icon since we now have the chatbox
+      // Only hide the floating icon after successful chatbox initialization
       this.hideFloatingIcon();
 
-      console.log('aiFiverr: Streaming chatbox initialized with conversation context:', this.streamingChatbox.conversationHistory);
+      console.log('aiFiverr: Streaming chatbox initialized successfully with conversation context:', this.streamingChatbox.conversationHistory);
+
+      // Log transition completion time
+      const transitionTime = Date.now() - transitionStartTime;
+      console.log(`aiFiverr: Transition completed in ${transitionTime}ms`);
 
       return true; // Success
     } catch (error) {
       console.error('aiFiverr: Error initializing streaming chatbox:', error);
+
+      // Cleanup on failure
+      if (this.streamingChatbox && this.streamingChatbox.isVisible) {
+        try {
+          this.streamingChatbox.hide();
+        } catch (cleanupError) {
+          console.error('aiFiverr: Error during cleanup:', cleanupError);
+        }
+      }
+
       return false; // Failure
+    }
+  }
+
+  /**
+   * Ensure API key session consistency between popup and streaming chat
+   * @returns {Promise<void>}
+   */
+  async ensureAPIKeySessionConsistency() {
+    try {
+      console.log('aiFiverr: Ensuring API key session consistency...');
+
+      // Check if API key manager is available
+      if (!window.apiKeyManager || !window.apiKeyManager.initialized) {
+        console.warn('aiFiverr: API key manager not available, cannot ensure session consistency');
+        return;
+      }
+
+      // Get the current session key for streaming chat
+      const sessionId = 'streaming_chat';
+      let sessionKey = window.apiKeyManager.getKeyForSession(sessionId);
+
+      if (!sessionKey) {
+        console.log('aiFiverr: No existing session key, creating new session');
+
+        // Try to get the same key that was used for the original request
+        // This could be stored in lastProcessedContext or retrieved from current session
+        const newKeyData = window.apiKeyManager.getNextKey();
+        if (newKeyData) {
+          window.apiKeyManager.setSessionKey(sessionId, newKeyData.key);
+          console.log('aiFiverr: New API key session established for streaming chat');
+        } else {
+          console.warn('aiFiverr: No API keys available for session');
+        }
+      } else {
+        console.log('aiFiverr: Existing API key session found for streaming chat');
+      }
+
+    } catch (error) {
+      console.error('aiFiverr: Error ensuring API key session consistency:', error);
+      // Don't fail the transition for API key issues, just log the error
     }
   }
 
