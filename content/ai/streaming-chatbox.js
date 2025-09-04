@@ -748,6 +748,79 @@ class StreamingChatbox {
   }
 
   /**
+   * Add file ID to suspicious files list to prevent future issues
+   * @param {string} fileId - File ID that caused permission error
+   */
+  async addToSuspiciousFilesList(fileId) {
+    try {
+      if (!this.suspiciousFileIds) {
+        this.suspiciousFileIds = new Set(['wrpdb7uq3ddk', '46vm361k1btt']);
+      }
+
+      this.suspiciousFileIds.add(fileId);
+      console.log('🚫 STREAMING CHATBOX: Added file ID to suspicious list:', fileId);
+
+      // Also try to clean up this file from current session
+      await this.removeFileFromCurrentSession(fileId);
+
+    } catch (error) {
+      console.error('🚨 STREAMING CHATBOX: Error adding file to suspicious list:', error);
+    }
+  }
+
+  /**
+   * Remove problematic file from current session
+   * @param {string} fileId - File ID to remove
+   */
+  async removeFileFromCurrentSession(fileId) {
+    try {
+      let removedCount = 0;
+
+      // Remove from manually attached files
+      if (this.manuallyAttachedFiles && Array.isArray(this.manuallyAttachedFiles)) {
+        const originalLength = this.manuallyAttachedFiles.length;
+        this.manuallyAttachedFiles = this.manuallyAttachedFiles.filter(file => {
+          const currentFileId = file.geminiUri ? file.geminiUri.split('/').pop() : null;
+          return currentFileId !== fileId;
+        });
+        removedCount += originalLength - this.manuallyAttachedFiles.length;
+      }
+
+      // Remove from current message files
+      if (this.currentMessageFiles && Array.isArray(this.currentMessageFiles)) {
+        const originalLength = this.currentMessageFiles.length;
+        this.currentMessageFiles = this.currentMessageFiles.filter(file => {
+          const currentFileId = file.geminiUri ? file.geminiUri.split('/').pop() : null;
+          return currentFileId !== fileId;
+        });
+        removedCount += originalLength - this.currentMessageFiles.length;
+      }
+
+      // Remove from conversation history
+      for (const message of this.conversationHistory) {
+        if (message.parts) {
+          const originalLength = message.parts.length;
+          message.parts = message.parts.filter(part => {
+            if (part.fileData && part.fileData.fileUri) {
+              const currentFileId = part.fileData.fileUri.split('/').pop();
+              return currentFileId !== fileId;
+            }
+            return true;
+          });
+          removedCount += originalLength - message.parts.length;
+        }
+      }
+
+      if (removedCount > 0) {
+        console.log(`🧹 STREAMING CHATBOX: Removed ${removedCount} references to problematic file ID: ${fileId}`);
+      }
+
+    } catch (error) {
+      console.error('🚨 STREAMING CHATBOX: Error removing file from session:', error);
+    }
+  }
+
+  /**
    * Set original prompt context for consistent variable usage
    * @param {Object} context - Original prompt processing context
    */
@@ -776,14 +849,21 @@ class StreamingChatbox {
     }
 
     const validFiles = [];
-    const suspiciousFileIds = ['wrpdb7uq3ddk']; // Known problematic file IDs
+
+    // Initialize suspicious files list if not already done
+    if (!this.suspiciousFileIds) {
+      this.suspiciousFileIds = new Set(['wrpdb7uq3ddk', '46vm361k1btt']);
+    }
 
     for (const file of files) {
       try {
-        // Check for suspicious file IDs
-        if (file.geminiUri && suspiciousFileIds.some(id => file.geminiUri.includes(id))) {
-          console.warn('🚨 StreamingChatbox: Skipping suspicious file ID:', file.geminiUri);
-          continue;
+        // Check for suspicious file IDs using dynamic list
+        if (file.geminiUri) {
+          const fileId = file.geminiUri.split('/').pop();
+          if (this.suspiciousFileIds.has(fileId)) {
+            console.warn('🚨 StreamingChatbox: Skipping suspicious file ID:', fileId, 'from file:', file.name);
+            continue;
+          }
         }
 
         // Validate URI format
@@ -1257,11 +1337,40 @@ class StreamingChatbox {
     // Build complete conversation context
     const contents = [];
 
-    // Add conversation history
+    // Add conversation history with file validation
+    // Initialize suspicious files list if not already done
+    if (!this.suspiciousFileIds) {
+      this.suspiciousFileIds = new Set(['wrpdb7uq3ddk', '46vm361k1btt']);
+    }
+
     for (const message of this.conversationHistory) {
+      // Filter out any stale file references from message parts
+      const cleanParts = [];
+
+      for (const part of message.parts) {
+        if (part.fileData && part.fileData.fileUri) {
+          const fileId = part.fileData.fileUri.split('/').pop();
+
+          // Check against dynamic suspicious file IDs
+          if (this.suspiciousFileIds.has(fileId)) {
+            console.log('🚫 STREAMING CHATBOX: Filtering out suspicious file from conversation history:', fileId);
+            continue; // Skip this file part
+          }
+
+          // Check for extremely short file IDs (likely invalid)
+          if (fileId.length < 8) {
+            console.log('🚫 STREAMING CHATBOX: Filtering out invalid file ID from conversation history:', fileId);
+            continue; // Skip this file part
+          }
+        }
+
+        // Keep this part (either not a file or a valid file)
+        cleanParts.push(part);
+      }
+
       contents.push({
         role: message.role === 'model' ? 'model' : 'user',
-        parts: message.parts
+        parts: cleanParts
       });
     }
 
@@ -1294,9 +1403,16 @@ class StreamingChatbox {
     }
 
     // REMOVED: No longer automatically include all knowledge base files
-    console.log('aiFiverr StreamingChatbox: Total files to include:', knowledgeBaseFiles.length);
+    console.log('aiFiverr StreamingChatbox: Total files to include before validation:', knowledgeBaseFiles.length);
 
-    // Add files to the last user message if available
+    // CRITICAL: Validate files before adding to API payload
+    if (knowledgeBaseFiles.length > 0) {
+      console.log('🔍 STREAMING CHATBOX: Validating files before API call...');
+      knowledgeBaseFiles = await this.validateFilesBeforeAPICall(knowledgeBaseFiles);
+      console.log('✅ STREAMING CHATBOX: File validation complete. Valid files:', knowledgeBaseFiles.length);
+    }
+
+    // Add validated files to the last user message if available
     if (knowledgeBaseFiles.length > 0 && contents.length > 0) {
       const lastUserMessage = contents[contents.length - 1];
       if (lastUserMessage.role === 'user') {
@@ -1308,7 +1424,7 @@ class StreamingChatbox {
                 mimeType: file.mimeType || 'text/plain'
               }
             });
-            console.log('aiFiverr StreamingChatbox: Added file to message:', file.name);
+            console.log('aiFiverr StreamingChatbox: Added validated file to message:', file.name);
           }
         }
       }
@@ -1346,16 +1462,42 @@ class StreamingChatbox {
 
     if (!response.ok) {
       let errorMessage = `Gemini streaming API error: ${response.status} - ${response.statusText}`;
+      let isFilePermissionError = false;
+
       try {
         const errorData = await response.json();
         if (errorData.error?.message) {
           errorMessage = `Gemini API error: ${errorData.error.message}`;
+
+          // Check if this is a file permission error
+          if (errorData.error.message.includes('You do not have permission to access the File') ||
+              errorData.error.message.includes('or it may not exist')) {
+            isFilePermissionError = true;
+            console.error('🚨 STREAMING CHATBOX: File permission error detected:', errorData.error.message);
+
+            // Extract file ID from error message if possible
+            const fileIdMatch = errorData.error.message.match(/File (\w+)/);
+            if (fileIdMatch) {
+              const problematicFileId = fileIdMatch[1];
+              console.error('🚨 STREAMING CHATBOX: Problematic file ID:', problematicFileId);
+
+              // Add to suspicious files list for future prevention
+              await this.addToSuspiciousFilesList(problematicFileId);
+            }
+          }
         }
       } catch (e) {
         // If we can't parse the error response, use the status text
       }
+
       console.error('aiFiverr StreamingChatbox: API request failed:', errorMessage);
-      throw new Error(errorMessage);
+
+      if (isFilePermissionError) {
+        // Provide user-friendly error message for file permission issues
+        throw new Error('Some attached files are no longer accessible. Please refresh your files and try again.');
+      } else {
+        throw new Error(errorMessage);
+      }
     }
 
     console.log('aiFiverr StreamingChatbox: API request successful, starting stream processing');
