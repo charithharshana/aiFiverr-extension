@@ -1144,10 +1144,6 @@ class TextSelector {
       const replySection = this.createReplySection();
       this.contextMenu.appendChild(replySection);
 
-      // Add grounding controls section
-      const groundingSection = await this.createGroundingControlsSection();
-      this.contextMenu.appendChild(groundingSection);
-
       // Add separator
       const separator = document.createElement('div');
       separator.style.cssText = 'height: 1px; background: #e5e7eb; margin: 8px 0;';
@@ -1197,7 +1193,7 @@ class TextSelector {
     leftSection.style.cssText = 'display: flex; align-items: center; justify-content: flex-start;';
 
     const mainSpan = document.createElement('span');
-    mainSpan.textContent = 'Reply Text ({reply})';
+    mainSpan.textContent = 'Reply Text ({reply} variable)';
 
     const optionalSpan = document.createElement('span');
     optionalSpan.textContent = 'Optional';
@@ -1316,154 +1312,6 @@ class TextSelector {
     section.appendChild(textarea);
 
     return section;
-  }
-
-  /**
-   * Create grounding controls section
-   */
-  async createGroundingControlsSection() {
-    const section = document.createElement('div');
-    section.style.cssText = 'padding: 12px 16px; background: #f8f9fa; border-top: 1px solid #e5e7eb;';
-
-    // Header
-    const header = document.createElement('div');
-    header.style.cssText = 'font-weight: 600; font-size: 12px; color: #374151; margin-bottom: 8px;';
-    header.textContent = 'AI Enhancement Tools';
-
-    // Controls container
-    const controlsContainer = document.createElement('div');
-    controlsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
-
-    // Get current settings
-    const settings = await this.getSettings();
-    const googleSearchDefault = settings?.googleSearchGrounding?.defaultEnabled || false;
-    const urlContextDefault = settings?.urlContextExtraction?.defaultEnabled || false;
-
-    // Google Search grounding control
-    const googleSearchControl = this.createToggleControl(
-      'googleSearchGrounding',
-      'Google Search grounding',
-      'Enable real-time web search for accurate, up-to-date information',
-      googleSearchDefault
-    );
-
-    // URL context extraction control
-    const urlContextControl = this.createToggleControl(
-      'urlContextExtraction',
-      'URL context extraction',
-      'Automatically extract and include content from URLs in text',
-      urlContextDefault
-    );
-
-    controlsContainer.appendChild(googleSearchControl);
-    controlsContainer.appendChild(urlContextControl);
-
-    section.appendChild(header);
-    section.appendChild(controlsContainer);
-
-    return section;
-  }
-
-  /**
-   * Create a toggle control (checkbox)
-   */
-  createToggleControl(id, label, description, defaultChecked = false) {
-    const container = document.createElement('div');
-    container.style.cssText = 'display: flex; align-items: flex-start; gap: 8px;';
-
-    // Checkbox
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.id = `aifiverr-${id}`;
-    checkbox.checked = defaultChecked;
-    checkbox.style.cssText = `
-      margin: 0;
-      margin-top: 2px;
-      cursor: pointer;
-      accent-color: #10b981;
-    `;
-
-    // Label and description container
-    const labelContainer = document.createElement('div');
-    labelContainer.style.cssText = 'flex: 1;';
-
-    const labelElement = document.createElement('label');
-    labelElement.htmlFor = checkbox.id;
-    labelElement.textContent = label;
-    labelElement.style.cssText = `
-      font-size: 12px;
-      font-weight: 500;
-      color: #374151;
-      cursor: pointer;
-      display: block;
-      margin-bottom: 2px;
-    `;
-
-    const descriptionElement = document.createElement('div');
-    descriptionElement.textContent = description;
-    descriptionElement.style.cssText = `
-      font-size: 10px;
-      color: #6b7280;
-      line-height: 1.3;
-    `;
-
-    labelContainer.appendChild(labelElement);
-    labelContainer.appendChild(descriptionElement);
-
-    container.appendChild(checkbox);
-    container.appendChild(labelContainer);
-
-    // Prevent dropdown from closing when interacting with controls
-    container.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      this.isInteractingWithUI = true;
-    });
-
-    checkbox.addEventListener('change', (e) => {
-      e.stopPropagation();
-      console.log(`aiFiverr: ${id} toggled:`, e.target.checked);
-    });
-
-    return container;
-  }
-
-  /**
-   * Get settings from storage
-   */
-  async getSettings() {
-    try {
-      if (window.storageManager) {
-        return await window.storageManager.getSettings();
-      }
-      // Fallback to direct storage access
-      const result = await chrome.storage.local.get('settings');
-      return result.settings || {};
-    } catch (error) {
-      console.error('aiFiverr: Error getting settings:', error);
-      return {};
-    }
-  }
-
-  /**
-   * Get grounding options from UI controls
-   */
-  getGroundingOptions() {
-    const options = {};
-
-    // Check Google Search grounding checkbox
-    const googleSearchCheckbox = document.getElementById('aifiverr-googleSearchGrounding');
-    if (googleSearchCheckbox && googleSearchCheckbox.checked) {
-      options.googleSearchGrounding = true;
-    }
-
-    // Check URL context extraction checkbox
-    const urlContextCheckbox = document.getElementById('aifiverr-urlContextExtraction');
-    if (urlContextCheckbox && urlContextCheckbox.checked) {
-      options.urlContextExtraction = true;
-      options.urlContextTool = true; // Enable the URL context tool in Gemini API
-    }
-
-    return options;
   }
 
   /**
@@ -1620,46 +1468,15 @@ class TextSelector {
         promptType: prompt.isDefault ? 'default' : 'custom'
       });
 
-      // Check if required managers are available with graceful degradation
+      // Check if required managers are available
       if (!window.sessionManager) {
-        console.warn('aiFiverr: Session manager not available, attempting to initialize...');
-        if (typeof window.initializeSessionManager === 'function') {
-          await window.initializeSessionManager();
-        }
-        if (!window.sessionManager) {
-          throw new Error('Session manager not available and could not be initialized');
-        }
+        throw new Error('Session manager not available');
       }
-
-      // CRITICAL FIX: Handle knowledge base manager initialization gracefully
       if (!window.knowledgeBaseManager) {
-        console.warn('aiFiverr: Knowledge base manager not available, attempting to initialize...');
-        if (typeof window.initializeKnowledgeBaseManager === 'function') {
-          await window.initializeKnowledgeBaseManager();
-        }
-
-        // If still not available, continue with degraded functionality
-        if (!window.knowledgeBaseManager) {
-          console.warn('aiFiverr: Knowledge base manager not available - continuing with limited functionality');
-        }
-      } else if (window.knowledgeBaseManager && !window.knowledgeBaseManager.initialized) {
-        // Manager exists but not initialized - wait for it
-        console.log('aiFiverr: Knowledge base manager exists but not initialized, waiting...');
-        try {
-          await window.knowledgeBaseManager.waitForInitialization(3000); // 3 second timeout
-        } catch (error) {
-          console.warn('aiFiverr: Failed to wait for knowledge base manager initialization:', error);
-        }
+        throw new Error('Knowledge base manager not available');
       }
-
       if (!window.geminiClient) {
-        console.warn('aiFiverr: Gemini client not available, attempting to initialize...');
-        if (typeof window.initializeGeminiClient === 'function') {
-          await window.initializeGeminiClient();
-        }
-        if (!window.geminiClient) {
-          throw new Error('Gemini client not available and could not be initialized');
-        }
+        throw new Error('Gemini client not available');
       }
 
       // Get or create session for text selection
@@ -1692,18 +1509,11 @@ class TextSelector {
       // Process prompt with enhanced error handling
       let result;
       try {
-        // Get all knowledge base variables to include in context (with graceful degradation)
-        let knowledgeBaseVariables = {};
-        if (window.knowledgeBaseManager) {
-          try {
-            knowledgeBaseVariables = window.knowledgeBaseManager.getAllVariables();
-            console.log('aiFiverr: Available knowledge base variables:', Object.keys(knowledgeBaseVariables));
-          } catch (error) {
-            console.warn('aiFiverr: Failed to get knowledge base variables:', error);
-          }
-        } else {
-          console.log('aiFiverr: Knowledge base manager not available - using empty variables');
-        }
+        // Get all knowledge base variables to include in context
+        const knowledgeBaseVariables = window.knowledgeBaseManager ?
+          window.knowledgeBaseManager.getAllVariables() : {};
+
+        console.log('aiFiverr: Available knowledge base variables:', Object.keys(knowledgeBaseVariables));
 
         // NEW APPROACH: Use variable processor to only include variables referenced in prompt
         const availableContext = {
@@ -1735,53 +1545,22 @@ class TextSelector {
 
         // CRITICAL FIX: Use knowledge base manager for saved prompts to get attached files
         // The variable processor doesn't know about files attached to saved prompts
-        let useKnowledgeBaseManager = false;
+        if (window.knowledgeBaseManager && promptKey) {
+          console.log('aiFiverr: Using knowledge base manager for saved prompt processing');
 
-        if (promptKey) {
-          // For saved prompts, we MUST use the knowledge base manager to get attached files
-          if (window.knowledgeBaseManager) {
-            useKnowledgeBaseManager = true;
-          } else {
-            // Knowledge base manager not available - try to initialize it
-            console.warn('aiFiverr: Knowledge base manager not available for saved prompt, attempting emergency initialization...');
-            if (typeof window.initializeKnowledgeBaseManager === 'function') {
-              try {
-                await window.initializeKnowledgeBaseManager();
-                if (window.knowledgeBaseManager) {
-                  useKnowledgeBaseManager = true;
-                  console.log('aiFiverr: Emergency initialization successful');
-                } else {
-                  console.error('aiFiverr: Emergency initialization failed - saved prompt files may not be attached');
-                }
-              } catch (error) {
-                console.error('aiFiverr: Emergency initialization error:', error);
-              }
-            }
-          }
-        }
+          // First get the prompt processing result from knowledge base manager
+          // This will include files that were attached to the saved prompt
+          result = await window.knowledgeBaseManager.processPrompt(promptKey, context);
 
-        if (useKnowledgeBaseManager && promptKey) {
-          try {
-            console.log('aiFiverr: Using knowledge base manager for saved prompt processing');
-
-            // First get the prompt processing result from knowledge base manager
-            // This will include files that were attached to the saved prompt
-            result = await window.knowledgeBaseManager.processPrompt(promptKey, context);
-
-            // Store context for streaming chat consistency
-            this.lastProcessedContext = availableContext;
-            this.lastUsedVariables = Object.keys(context);
-            this.lastKnowledgeBaseFiles = result.knowledgeBaseFiles || [];
-            this.lastUsedPrompt = result.prompt;
-          } catch (error) {
-            console.warn('aiFiverr: Failed to process saved prompt with knowledge base manager:', error);
-            // Fall back to variable processor
-            result = null;
-          }
+          // Store context for streaming chat consistency
+          this.lastProcessedContext = availableContext;
+          this.lastUsedVariables = Object.keys(context);
+          this.lastKnowledgeBaseFiles = result.knowledgeBaseFiles || [];
+          this.lastUsedPrompt = result.prompt;
 
           console.log('aiFiverr: Knowledge base manager processing result:');
-          console.log('aiFiverr: Files from saved prompt:', (result?.knowledgeBaseFiles || []).length);
-          console.log('aiFiverr: Files details:', (result?.knowledgeBaseFiles || []).map(f => ({
+          console.log('aiFiverr: Files from saved prompt:', (result.knowledgeBaseFiles || []).length);
+          console.log('aiFiverr: Files details:', (result.knowledgeBaseFiles || []).map(f => ({
             name: f.name,
             hasGeminiUri: !!f.geminiUri,
             mimeType: f.mimeType
@@ -1864,52 +1643,36 @@ class TextSelector {
 
       // CRITICAL FIX: If no files specified in prompt, include all available knowledge base files
       // This ensures floating icon has access to knowledge base files like other components
-      if (knowledgeBaseFiles.length === 0) {
-        // Try to ensure knowledge base manager is available
-        let kbManagerAvailable = !!window.knowledgeBaseManager;
+      if (knowledgeBaseFiles.length === 0 && window.knowledgeBaseManager) {
+        try {
+          console.log('aiFiverr: No files from variable processor, attempting to load all available knowledge base files');
 
-        if (!kbManagerAvailable && typeof window.initializeKnowledgeBaseManager === 'function') {
-          console.log('aiFiverr: Knowledge base manager not available for file loading, attempting initialization...');
-          try {
-            await window.initializeKnowledgeBaseManager();
-            kbManagerAvailable = !!window.knowledgeBaseManager;
-          } catch (error) {
-            console.warn('aiFiverr: Failed to initialize knowledge base manager for file loading:', error);
+          // For floating icon, we should include all available knowledge base files
+          // This matches the behavior of other components like popup and streaming chatbox
+          knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFiles();
+
+          console.log('aiFiverr: Loaded all available knowledge base files:', knowledgeBaseFiles.length, 'files');
+
+          // If the main method didn't work, try the optimized method as fallback
+          if (knowledgeBaseFiles.length === 0) {
+            console.log('aiFiverr: Main method returned no files, trying optimized method');
+
+            const fileOptions = {
+              manuallySelectedFiles: null,
+              promptReferencedFiles: null,
+              enableSmartSelection: true,
+              promptText: processedPrompt,
+              fallbackToAll: true // Load all files as fallback
+            };
+
+            knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFilesOptimized(fileOptions);
+            console.log('aiFiverr: Optimized method found', knowledgeBaseFiles.length, 'files');
           }
-        }
 
-        if (kbManagerAvailable) {
-          try {
-            console.log('aiFiverr: No files from prompt processing, attempting to load all available knowledge base files');
+        } catch (error) {
+          console.warn('aiFiverr: Failed to load knowledge base files:', error);
 
-            // For floating icon, we should include all available knowledge base files
-            // This matches the behavior of other components like popup and streaming chatbox
-            knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFiles();
-
-            console.log('aiFiverr: Loaded all available knowledge base files:', knowledgeBaseFiles.length, 'files');
-
-            // If the main method didn't work, try the optimized method as fallback
-            if (knowledgeBaseFiles.length === 0) {
-              console.log('aiFiverr: Main method returned no files, trying optimized method');
-
-              const fileOptions = {
-                manuallySelectedFiles: null,
-                promptReferencedFiles: null,
-                enableSmartSelection: true,
-                promptText: processedPrompt,
-                fallbackToAll: true // Load all files as fallback
-              };
-
-              knowledgeBaseFiles = await window.knowledgeBaseManager.getKnowledgeBaseFilesOptimized(fileOptions);
-              console.log('aiFiverr: Optimized method found', knowledgeBaseFiles.length, 'files');
-            }
-
-          } catch (error) {
-            console.warn('aiFiverr: Failed to load knowledge base files:', error);
-            knowledgeBaseFiles = [];
-          }
-        } else {
-          console.log('aiFiverr: Knowledge base manager not available - proceeding without knowledge base files');
+          // Final fallback: empty array
           knowledgeBaseFiles = [];
         }
       }
@@ -2013,49 +1776,15 @@ class TextSelector {
       this.lastUsedPrompt = finalPrompt;
       console.log('aiFiverr: Stored final prompt for streaming chat context:', finalPrompt.substring(0, 100) + '...');
 
-      // Get grounding settings from UI controls
-      const groundingOptions = this.getGroundingOptions();
-      console.log('aiFiverr: Using grounding options:', groundingOptions);
-
-      // CRITICAL DEBUG: Log final knowledge base files before API call
-      console.log('🚨 TEXT-SELECTOR: Final knowledge base files before API call:', {
-        count: knowledgeBaseFiles.length,
-        files: knowledgeBaseFiles.map(f => ({
-          name: f.name,
-          hasGeminiUri: !!f.geminiUri,
-          geminiUri: f.geminiUri?.substring(0, 50) + '...',
-          mimeType: f.mimeType
-        }))
-      });
-
       let response;
       try {
-        const apiOptions = {
-          knowledgeBaseFiles,
-          ...groundingOptions
-        };
-
-        console.log('🚨 TEXT-SELECTOR: API options being sent to Gemini client:', {
-          hasKnowledgeBaseFiles: !!apiOptions.knowledgeBaseFiles,
-          knowledgeBaseFilesCount: apiOptions.knowledgeBaseFiles?.length || 0,
-          groundingOptions: groundingOptions
-        });
-
-        response = await window.geminiClient.generateChatReply(session, finalPrompt, apiOptions);
+        response = await window.geminiClient.generateChatReply(session, finalPrompt, { knowledgeBaseFiles });
 
         if (!response || !response.response) {
           throw new Error('Empty response from AI service');
         }
 
         console.log('aiFiverr: Got AI response:', response.response.substring(0, 100) + '...');
-
-        // Log grounding metadata if available
-        if (response.groundingMetadata) {
-          console.log('aiFiverr: Response includes grounding metadata');
-        }
-        if (response.urlContextMetadata) {
-          console.log('aiFiverr: Response includes URL context metadata');
-        }
       } catch (aiError) {
         console.error('aiFiverr: Error generating AI response:', aiError);
         throw new Error(`AI service error: ${aiError.message}`);

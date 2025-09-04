@@ -79,43 +79,10 @@ class GeminiClient {
         role: "user"
       }];
 
-      // Process URL context extraction if enabled
-      let processedPrompt = prompt;
-      if (options.urlContextExtraction && window.urlContextExtractor) {
-        try {
-          const urlResult = await window.urlContextExtractor.processText(prompt);
-          processedPrompt = urlResult.enhancedText;
-          console.log('aiFiverr Gemini: URL context extraction applied');
-        } catch (error) {
-          console.warn('aiFiverr Gemini: URL context extraction failed:', error);
-        }
-      }
-
       // Add knowledge base files first if provided
       if (options.knowledgeBaseFiles && options.knowledgeBaseFiles.length > 0) {
         let validFilesCount = 0;
-        console.log('🔍 GEMINI CLIENT: Checking', options.knowledgeBaseFiles.length, 'knowledge base files for expiration');
-
         for (const file of options.knowledgeBaseFiles) {
-          // Enhanced file expiration logging with multiple timestamp field support
-          if (file.geminiUri) {
-            const isExpired = this.isFileExpired(file);
-
-            // Check all possible timestamp fields
-            const createTimeRaw = file.createTime || file.geminiCreateTime || file.geminiUploadTime || file.uploadTimestamp;
-            const createTime = createTimeRaw ? (typeof createTimeRaw === 'number' ? new Date(createTimeRaw) : new Date(createTimeRaw)) : null;
-            const hoursSinceCreation = createTime ? (Date.now() - createTime.getTime()) / (1000 * 60 * 60) : 'unknown';
-
-            console.log(`🔍 File: ${file.name}`, {
-              geminiUri: file.geminiUri.substring(0, 50) + '...',
-              createTime: createTime?.toISOString(),
-              createTimeSource: file.createTime ? 'createTime' : file.geminiCreateTime ? 'geminiCreateTime' : file.geminiUploadTime ? 'geminiUploadTime' : file.uploadTimestamp ? 'uploadTimestamp' : 'none',
-              hoursSinceCreation: typeof hoursSinceCreation === 'number' ? hoursSinceCreation.toFixed(1) : hoursSinceCreation,
-              isExpired,
-              status: isExpired ? '❌ EXPIRED' : '✅ VALID'
-            });
-          }
-
           if (file.geminiUri && !this.isFileExpired(file)) {
             let finalMimeType = file.mimeType || 'text/plain';
 
@@ -180,9 +147,9 @@ class GeminiClient {
         console.log('aiFiverr Gemini: Added', validFilesCount, 'valid knowledge base files (', options.knowledgeBaseFiles.length, 'total)');
       }
 
-      // Add text prompt (use processed prompt with URL context if available)
+      // Add text prompt
       contents[0].parts.push({
-        text: processedPrompt
+        text: prompt
       });
 
       const payload = {
@@ -193,27 +160,6 @@ class GeminiClient {
           candidateCount: 1
         }
       };
-
-      // Add tools for grounding and URL context if enabled
-      const tools = [];
-
-      // Add Google Search grounding tool if enabled
-      if (options.googleSearchGrounding) {
-        tools.push({ googleSearch: {} });
-        console.log('aiFiverr Gemini: Google Search grounding enabled');
-      }
-
-      // Add URL context tool if enabled
-      if (options.urlContextTool) {
-        tools.push({ urlContext: {} });
-        console.log('aiFiverr Gemini: URL context tool enabled');
-      }
-
-      // Add tools to payload if any are enabled
-      if (tools.length > 0) {
-        payload.tools = tools;
-        console.log('aiFiverr Gemini: Added tools to payload:', tools.length);
-      }
 
       // Log payload summary for debugging
       console.log('aiFiverr Gemini: Sending request to API with', payload.contents.length, 'content parts');
@@ -270,20 +216,6 @@ class GeminiClient {
           console.error('💡 This file no longer exists or you don\'t have permission to access it');
           console.error('🔧 SOLUTION: Remove this file from your knowledge base and upload a fresh copy');
 
-          // Try to auto-refresh expired files if knowledge base manager is available
-          if (window.knowledgeBaseManager) {
-            console.log('🔄 Attempting to auto-refresh expired files...');
-            try {
-              const currentApiKey = await this.getApiKey();
-              const refreshResult = await window.knowledgeBaseManager.refreshExpiredFiles(currentApiKey);
-              if (refreshResult.refreshed > 0) {
-                throw new Error(`File access error detected. ${refreshResult.refreshed} files were automatically refreshed. Please try your request again.`);
-              }
-            } catch (refreshError) {
-              console.warn('🚨 Auto-refresh failed:', refreshError);
-            }
-          }
-
           throw new Error(`Stale file reference detected (${fileId}). Please remove this file from your knowledge base and upload a fresh copy. The file may have expired or been deleted.`);
         }
 
@@ -297,17 +229,9 @@ class GeminiClient {
       }
 
       const text = result.candidates[0].content.parts[0].text;
-
-      // Extract grounding metadata if available
-      const groundingMetadata = result.candidates[0].groundingMetadata;
-      const urlContextMetadata = result.candidates[0].urlContextMetadata;
-
       return {
         text: text,
-        response: text, // For compatibility
-        groundingMetadata,
-        urlContextMetadata,
-        fullResult: result // Include full result for advanced processing
+        response: text // For compatibility
       };
 
     } catch (error) {
@@ -351,38 +275,9 @@ class GeminiClient {
       const currentMessageParts = [];
 
       // Add knowledge base files first if provided
-      console.log('🚨 GEMINI CLIENT CHAT: Received options:', {
-        hasKnowledgeBaseFiles: !!options.knowledgeBaseFiles,
-        knowledgeBaseFilesCount: options.knowledgeBaseFiles?.length || 0,
-        knowledgeBaseFilesType: typeof options.knowledgeBaseFiles,
-        googleSearchGrounding: options.googleSearchGrounding,
-        urlContextExtraction: options.urlContextExtraction
-      });
-
       if (options.knowledgeBaseFiles && options.knowledgeBaseFiles.length > 0) {
         let validFilesCount = 0;
-        console.log('🔍 GEMINI CHAT: Checking', options.knowledgeBaseFiles.length, 'knowledge base files for expiration');
-
         for (const file of options.knowledgeBaseFiles) {
-          // Enhanced file expiration logging for chat with multiple timestamp field support
-          if (file.geminiUri) {
-            const isExpired = this.isFileExpired(file);
-
-            // Check all possible timestamp fields
-            const createTimeRaw = file.createTime || file.geminiCreateTime || file.geminiUploadTime || file.uploadTimestamp;
-            const createTime = createTimeRaw ? (typeof createTimeRaw === 'number' ? new Date(createTimeRaw) : new Date(createTimeRaw)) : null;
-            const hoursSinceCreation = createTime ? (Date.now() - createTime.getTime()) / (1000 * 60 * 60) : 'unknown';
-
-            console.log(`🔍 Chat File: ${file.name}`, {
-              geminiUri: file.geminiUri.substring(0, 50) + '...',
-              createTime: createTime?.toISOString(),
-              createTimeSource: file.createTime ? 'createTime' : file.geminiCreateTime ? 'geminiCreateTime' : file.geminiUploadTime ? 'geminiUploadTime' : file.uploadTimestamp ? 'uploadTimestamp' : 'none',
-              hoursSinceCreation: typeof hoursSinceCreation === 'number' ? hoursSinceCreation.toFixed(1) : hoursSinceCreation,
-              isExpired,
-              status: isExpired ? '❌ EXPIRED' : '✅ VALID'
-            });
-          }
-
           if (file.geminiUri && !this.isFileExpired(file)) {
             let finalMimeType = file.mimeType || 'text/plain';
 
@@ -441,46 +336,14 @@ class GeminiClient {
             currentMessageParts.push(fileDataPart);
             validFilesCount++;
           } else if (file.geminiUri && this.isFileExpired(file)) {
-            const createTimeRaw = file.createTime || file.geminiCreateTime || file.geminiUploadTime || file.uploadTimestamp;
-            const createTime = createTimeRaw ? (typeof createTimeRaw === 'number' ? new Date(createTimeRaw) : new Date(createTimeRaw)) : null;
-            const hoursSinceCreation = createTime ? (Date.now() - createTime.getTime()) / (1000 * 60 * 60) : 'unknown';
-            console.warn('🚨 aiFiverr Gemini: Skipping expired file:', {
-              name: file.name,
-              createTime: createTime?.toISOString(),
-              createTimeSource: file.createTime ? 'createTime' : file.geminiCreateTime ? 'geminiCreateTime' : file.geminiUploadTime ? 'geminiUploadTime' : file.uploadTimestamp ? 'uploadTimestamp' : 'none',
-              hoursSinceCreation: typeof hoursSinceCreation === 'number' ? hoursSinceCreation.toFixed(1) + ' hours' : hoursSinceCreation,
-              geminiUri: file.geminiUri.substring(0, 50) + '...',
-              message: 'File expired (48-hour limit exceeded). Please refresh or re-upload.'
-            });
-          } else if (file.geminiUri) {
-            console.warn('🚨 aiFiverr Gemini: File has URI but failed other checks:', {
-              name: file.name,
-              hasGeminiUri: !!file.geminiUri,
-              hasCreateTime: !!file.createTime,
-              hasGeminiCreateTime: !!file.geminiCreateTime,
-              hasGeminiUploadTime: !!file.geminiUploadTime,
-              hasUploadTimestamp: !!file.uploadTimestamp,
-              message: 'File may be in invalid state - check timestamp fields'
-            });
+            console.warn('aiFiverr Gemini: Skipping expired file in chat:', file.name);
           }
         }
         console.log('aiFiverr Gemini: Added', validFilesCount, 'valid knowledge base files to chat (', options.knowledgeBaseFiles.length, 'total)');
       }
 
-      // Process URL context extraction if enabled
-      let processedMessage = message;
-      if (options.urlContextExtraction && window.urlContextExtractor) {
-        try {
-          const urlResult = await window.urlContextExtractor.processText(message);
-          processedMessage = urlResult.enhancedText;
-          console.log('aiFiverr Gemini Chat: URL context extraction applied');
-        } catch (error) {
-          console.warn('aiFiverr Gemini Chat: URL context extraction failed:', error);
-        }
-      }
-
-      // Add text message (use processed message with URL context if available)
-      currentMessageParts.push({ text: processedMessage });
+      // Add text message
+      currentMessageParts.push({ text: message });
 
       contents.push({
         role: 'user',
@@ -495,27 +358,6 @@ class GeminiClient {
           candidateCount: 1
         }
       };
-
-      // Add tools for grounding and URL context if enabled
-      const tools = [];
-
-      // Add Google Search grounding tool if enabled
-      if (options.googleSearchGrounding) {
-        tools.push({ googleSearch: {} });
-        console.log('aiFiverr Gemini Chat: Google Search grounding enabled');
-      }
-
-      // Add URL context tool if enabled
-      if (options.urlContextTool) {
-        tools.push({ urlContext: {} });
-        console.log('aiFiverr Gemini Chat: URL context tool enabled');
-      }
-
-      // Add tools to payload if any are enabled
-      if (tools.length > 0) {
-        payload.tools = tools;
-        console.log('aiFiverr Gemini Chat: Added tools to payload:', tools.length);
-      }
 
       // COMPREHENSIVE PAYLOAD DEBUGGING - Log the entire payload being sent
       console.log('🚨 STREAMING PAYLOAD DEBUG: Full payload being sent to Gemini API:', JSON.stringify(payload, null, 2));
@@ -557,20 +399,6 @@ class GeminiClient {
           console.error('💡 This file no longer exists or you don\'t have permission to access it');
           console.error('🔧 SOLUTION: Remove this file from your knowledge base and upload a fresh copy');
 
-          // Try to auto-refresh expired files if knowledge base manager is available
-          if (window.knowledgeBaseManager) {
-            console.log('🔄 Attempting to auto-refresh expired files...');
-            try {
-              const currentApiKey = await this.getApiKey();
-              const refreshResult = await window.knowledgeBaseManager.refreshExpiredFiles(currentApiKey);
-              if (refreshResult.refreshed > 0) {
-                throw new Error(`File access error detected. ${refreshResult.refreshed} files were automatically refreshed. Please try your request again.`);
-              }
-            } catch (refreshError) {
-              console.warn('🚨 Auto-refresh failed:', refreshError);
-            }
-          }
-
           throw new Error(`Stale file reference detected (${fileId}). Please remove this file from your knowledge base and upload a fresh copy. The file may have expired or been deleted.`);
         }
 
@@ -585,10 +413,6 @@ class GeminiClient {
 
       const responseText = result.candidates[0].content.parts[0].text;
 
-      // Extract grounding metadata if available
-      const groundingMetadata = result.candidates[0].groundingMetadata;
-      const urlContextMetadata = result.candidates[0].urlContextMetadata;
-
       // Add to session if provided
       if (session && session.addMessage) {
         session.addMessage('user', message);
@@ -597,10 +421,7 @@ class GeminiClient {
 
       return {
         response: responseText,
-        text: responseText, // For compatibility
-        groundingMetadata,
-        urlContextMetadata,
-        fullResult: result // Include full result for advanced processing
+        text: responseText // For compatibility
       };
 
     } catch (error) {
@@ -613,28 +434,14 @@ class GeminiClient {
    * Check if a file is expired (48 hours from creation)
    */
   isFileExpired(file) {
-    if (!file) {
-      return false;
-    }
-
-    // Check multiple possible timestamp fields (different parts of system use different names)
-    const createTime = file.createTime || file.geminiCreateTime || file.geminiUploadTime || file.uploadTimestamp;
-
-    if (!createTime) {
-      console.warn('aiFiverr Gemini: No timestamp found for file:', file.name, {
-        hasCreateTime: !!file.createTime,
-        hasGeminiCreateTime: !!file.geminiCreateTime,
-        hasGeminiUploadTime: !!file.geminiUploadTime,
-        hasUploadTimestamp: !!file.uploadTimestamp
-      });
+    if (!file || !file.createTime) {
       return false;
     }
 
     try {
-      // Handle both ISO string and timestamp formats
-      const createTimeDate = typeof createTime === 'number' ? new Date(createTime) : new Date(createTime);
+      const createTime = new Date(file.createTime);
       const now = new Date();
-      const hoursDiff = (now - createTimeDate) / (1000 * 60 * 60);
+      const hoursDiff = (now - createTime) / (1000 * 60 * 60);
 
       return hoursDiff >= 48;
     } catch (error) {

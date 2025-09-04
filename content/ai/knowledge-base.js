@@ -10,56 +10,33 @@ class KnowledgeBaseManager {
     this.templates = new Map();
     this.files = new Map(); // Store file references
     this.fileCache = new Map(); // Cache file data
-    this.initialized = false;
-    this.initializing = false;
     this.init();
   }
 
   async init() {
-    if (this.initializing || this.initialized) {
-      return;
-    }
+    // First, clean up any existing fake templates
+    await this.cleanupFakeTemplates();
 
-    this.initializing = true;
+    await this.loadKnowledgeBase();
+    await this.loadCustomPrompts();
+    await this.loadTemplates();
+    await this.loadKnowledgeBaseFiles();
 
-    try {
-      console.log('aiFiverr KB: Starting initialization...');
+    // Only initialize file lifecycle manager and sync if authenticated
+    if (this.isUserAuthenticated()) {
+      // Initialize comprehensive file lifecycle manager
+      await this.initializeFileLifecycleManager();
 
-      // First, clean up any existing fake templates
-      await this.cleanupFakeTemplates();
-
-      await this.loadKnowledgeBase();
-      await this.loadCustomPrompts();
-      await this.loadTemplates();
-      await this.loadKnowledgeBaseFiles();
-
-      // CRITICAL FIX: Fix any files with missing timestamps after loading
-      await this.fixFilesWithMissingTimestamps();
-
-      // Only initialize file lifecycle manager and sync if authenticated
-      if (this.isUserAuthenticated()) {
-        // Initialize comprehensive file lifecycle manager
-        await this.initializeFileLifecycleManager();
-
-        // Sync with Gemini Files API in background to avoid blocking initialization
-        this.syncWithGeminiFilesInBackground();
-      } else {
-        if (window.aiFiverrDebug) {
-          console.log('aiFiverr KB: Skipping file operations - user not authenticated');
-        }
+      // Sync with Gemini Files API in background to avoid blocking initialization
+      this.syncWithGeminiFilesInBackground();
+    } else {
+      if (window.aiFiverrDebug) {
+        console.log('aiFiverr KB: Skipping file operations - user not authenticated');
       }
-
-      // Set up authentication listener to sync when user signs in
-      this.setupAuthListener();
-
-      this.initialized = true;
-      console.log('aiFiverr KB: Initialization completed successfully');
-
-    } catch (error) {
-      console.error('aiFiverr KB: Initialization failed:', error);
-    } finally {
-      this.initializing = false;
     }
+
+    // Set up authentication listener to sync when user signs in
+    this.setupAuthListener();
   }
 
   /**
@@ -67,30 +44,6 @@ class KnowledgeBaseManager {
    */
   isUserAuthenticated() {
     return window.googleAuthService && window.googleAuthService.isUserAuthenticated();
-  }
-
-  /**
-   * Wait for initialization to complete
-   */
-  async waitForInitialization(maxWaitMs = 5000) {
-    const startTime = Date.now();
-
-    while (!this.initialized && (Date.now() - startTime) < maxWaitMs) {
-      if (!this.initializing) {
-        // If not initializing and not initialized, something went wrong
-        console.warn('aiFiverr KB: Manager not initializing - attempting to restart initialization');
-        this.init();
-      }
-
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-
-    if (!this.initialized) {
-      console.warn('aiFiverr KB: Initialization timeout after', maxWaitMs, 'ms');
-      return false;
-    }
-
-    return true;
   }
 
   /**
@@ -697,9 +650,7 @@ class KnowledgeBaseManager {
 
       this.files.clear();
       Object.entries(files).forEach(([key, fileData]) => {
-        // CRITICAL FIX: Normalize timestamps when loading files from storage
-        const normalizedFileData = this.normalizeFileTimestamps(fileData);
-        this.files.set(key, normalizedFileData);
+        this.files.set(key, fileData);
       });
 
       // Only log if debugging is enabled
@@ -789,11 +740,8 @@ class KnowledgeBaseManager {
       console.warn('aiFiverr KB: Could not determine upload API key:', error);
     }
 
-    // CRITICAL FIX: Normalize timestamp fields for consistent access across system
-    const normalizedFileData = this.normalizeFileTimestamps(fileData);
-
     this.files.set(key, {
-      ...normalizedFileData,
+      ...fileData,
       addedAt: new Date().toISOString(),
       type: 'file',
       // NEW: Track which API key was used to upload this file
@@ -836,43 +784,6 @@ class KnowledgeBaseManager {
   }
 
   /**
-   * Normalize file timestamp fields for consistent access across system components
-   * CRITICAL FIX: Different parts of system use different field names for timestamps
-   */
-  normalizeFileTimestamps(fileData) {
-    const normalized = { ...fileData };
-
-    // Extract timestamp from any available field
-    const timestamp = fileData.createTime ||
-                     fileData.geminiCreateTime ||
-                     fileData.geminiUploadTime ||
-                     fileData.uploadTimestamp ||
-                     fileData.createdTime ||
-                     fileData.addedAt;
-
-    if (timestamp) {
-      // Ensure all timestamp fields are populated for cross-component compatibility
-      const timestampValue = typeof timestamp === 'number' ? timestamp : new Date(timestamp).getTime();
-      const isoString = new Date(timestampValue).toISOString();
-
-      normalized.createTime = isoString;           // For Gemini client compatibility
-      normalized.geminiCreateTime = isoString;     // For Firebase background compatibility
-      normalized.geminiUploadTime = timestampValue; // For knowledge base manager compatibility
-      normalized.uploadTimestamp = timestampValue;  // For API key rotation compatibility
-
-      console.log(`aiFiverr KB: Normalized timestamps for ${fileData.name}:`, {
-        originalTimestamp: timestamp,
-        normalizedISO: isoString,
-        normalizedTimestamp: timestampValue
-      });
-    } else {
-      console.warn(`aiFiverr KB: No timestamp found for file ${fileData.name} - file may be inaccessible`);
-    }
-
-    return normalized;
-  }
-
-  /**
    * Get the API key that should be used to access a specific file
    * @param {string} fileKey - The file key
    * @returns {string|null} - The API key to use for this file
@@ -910,18 +821,14 @@ class KnowledgeBaseManager {
     }
 
     // Update the file reference with new API key and URI
-    const updatedFileData = {
+    this.files.set(fileKey, {
       ...fileRef,
       uploadApiKey: newApiKey,
       uploadApiKeyHash: this.hashApiKey(newApiKey),
       uploadTimestamp: Date.now(),
       geminiUri: newGeminiUri,
       refreshedAt: new Date().toISOString()
-    };
-
-    // CRITICAL FIX: Normalize timestamps after API key update
-    const normalizedFileData = this.normalizeFileTimestamps(updatedFileData);
-    this.files.set(fileKey, normalizedFileData);
+    });
 
     await this.saveKnowledgeBaseFiles();
     console.log(`aiFiverr KB: Updated API key for file ${fileKey}`);
@@ -3120,24 +3027,11 @@ class KnowledgeBaseManager {
 }
 
 // Create global knowledge base manager - but only when explicitly called
-async function initializeKnowledgeBaseManager() {
+function initializeKnowledgeBaseManager() {
   if (!window.knowledgeBaseManager) {
-    console.log('aiFiverr: Creating Knowledge Base Manager...');
     window.knowledgeBaseManager = new KnowledgeBaseManager();
+    console.log('aiFiverr: Knowledge Base Manager created');
   }
-
-  // Wait for initialization to complete
-  try {
-    const initSuccess = await window.knowledgeBaseManager.waitForInitialization();
-    if (initSuccess) {
-      console.log('aiFiverr: Knowledge Base Manager initialized successfully');
-    } else {
-      console.warn('aiFiverr: Knowledge Base Manager initialization timeout - continuing with limited functionality');
-    }
-  } catch (error) {
-    console.error('aiFiverr: Error during Knowledge Base Manager initialization:', error);
-  }
-
   return window.knowledgeBaseManager;
 }
 
@@ -3271,49 +3165,5 @@ window.testFileManagement = {
 
     console.log('📊 Test Results:', results);
     return results;
-  }
-
-  /**
-   * Fix files with missing timestamps by normalizing existing data
-   * CRITICAL FIX: Repair files that have valid Gemini URIs but missing timestamp metadata
-   */
-  async fixFilesWithMissingTimestamps() {
-    console.log('aiFiverr KB: Checking for files with missing timestamps...');
-
-    let fixedCount = 0;
-    const now = Date.now();
-    const currentTime = new Date().toISOString();
-
-    for (const [fileKey, fileRef] of this.files) {
-      // Check if file has Gemini URI but missing all timestamp fields
-      if (fileRef.geminiUri && !fileRef.createTime && !fileRef.geminiCreateTime &&
-          !fileRef.geminiUploadTime && !fileRef.uploadTimestamp) {
-
-        console.log(`aiFiverr KB: Fixing missing timestamps for file: ${fileRef.name}`);
-
-        // Set current time as fallback (file will be treated as fresh)
-        const fixedFileData = {
-          ...fileRef,
-          createTime: currentTime,
-          geminiCreateTime: currentTime,
-          geminiUploadTime: now,
-          uploadTimestamp: now,
-          fixedTimestamp: true, // Mark as fixed for debugging
-          fixedAt: currentTime
-        };
-
-        this.files.set(fileKey, fixedFileData);
-        fixedCount++;
-      }
-    }
-
-    if (fixedCount > 0) {
-      await this.saveKnowledgeBaseFiles();
-      console.log(`aiFiverr KB: Fixed timestamps for ${fixedCount} files`);
-    } else {
-      console.log('aiFiverr KB: No files with missing timestamps found');
-    }
-
-    return { fixedCount };
   }
 };
