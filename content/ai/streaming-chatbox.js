@@ -31,40 +31,21 @@ class StreamingChatbox {
     this.originalVariableUsage = null; // Stores which variables were used in original prompt
     this.manuallyAttachedFiles = []; // Stores manually attached files
 
-    // NEW: Retry context preservation for 503 Service Unavailable errors
-    this.retryContext = null; // Stores context for retry after 503 errors
-
-    // Split initialization for better timing control
-    this.initSync();
-    this.initAsync().catch(error => {
-      console.error('aiFiverr StreamingChatbox: Failed to initialize async components:', error);
-    });
+    this.init();
   }
 
   /**
-   * Initialize synchronous components (DOM elements, event listeners)
+   * Initialize the chatbox
    */
-  initSync() {
+  init() {
     try {
       this.createChatboxElement();
       this.setupEventListeners();
-      this.hide(); // Start hidden
-      console.log('aiFiverr StreamingChatbox: Sync initialization completed');
-    } catch (error) {
-      console.error('aiFiverr StreamingChatbox: Error during sync initialization:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Initialize asynchronous components (markdown renderer, file validation)
-   */
-  async initAsync() {
-    try {
       this.initializeMarkdownRenderer();
-      console.log('aiFiverr StreamingChatbox: Async initialization completed');
+      this.hide(); // Start hidden
     } catch (error) {
-      console.error('aiFiverr StreamingChatbox: Error during async initialization:', error);
+      console.error('aiFiverr StreamingChatbox: Error during initialization:', error);
+      throw error;
     }
   }
 
@@ -695,26 +676,8 @@ class StreamingChatbox {
    * Show the chatbox
    */
   show(initialMessage = null) {
-    console.log('👁️ StreamingChatbox: show() called');
-
-    if (!this.chatboxElement) {
-      console.error('❌ StreamingChatbox: Cannot show - chatboxElement not created');
-      return false;
-    }
-
     this.isVisible = true;
     this.chatboxElement.style.display = 'flex';
-
-    // Debug visibility
-    const computedStyles = window.getComputedStyle(this.chatboxElement);
-    console.log('🔍 StreamingChatbox: Visibility debug:', {
-      isVisible: this.isVisible,
-      display: this.chatboxElement.style.display,
-      computedDisplay: computedStyles.display,
-      zIndex: computedStyles.zIndex,
-      position: computedStyles.position,
-      inDOM: document.body.contains(this.chatboxElement)
-    });
 
     if (initialMessage) {
       this.addMessage('assistant', initialMessage);
@@ -722,243 +685,8 @@ class StreamingChatbox {
 
     // Focus input
     setTimeout(() => {
-      if (this.inputElement) {
-        this.inputElement.focus();
-      }
+      this.inputElement.focus();
     }, 100);
-
-    return true;
-  }
-
-  /**
-   * Debug status method for troubleshooting
-   */
-  debugStatus() {
-    const status = {
-      isVisible: this.isVisible,
-      hasElement: !!this.chatboxElement,
-      elementInDOM: this.chatboxElement ? document.body.contains(this.chatboxElement) : false,
-      elementDisplay: this.chatboxElement ? this.chatboxElement.style.display : 'N/A',
-      hasMessagesContainer: !!this.messagesContainer,
-      hasInputElement: !!this.inputElement,
-      hasSendButton: !!this.sendButton,
-      conversationHistoryLength: this.conversationHistory.length,
-      isStreaming: this.isStreaming
-    };
-
-    console.log('🔍 StreamingChatbox Debug Status:', status);
-    return status;
-  }
-
-  /**
-   * Add file ID to suspicious files list to prevent future issues
-   * @param {string} fileId - File ID that caused permission error
-   */
-  async addToSuspiciousFilesList(fileId) {
-    try {
-      if (!this.suspiciousFileIds) {
-        this.suspiciousFileIds = new Set(['wrpdb7uq3ddk']); // Only confirmed problematic files
-      }
-
-      this.suspiciousFileIds.add(fileId);
-      console.log('🚫 STREAMING CHATBOX: Added file ID to suspicious list:', fileId);
-
-      // Also try to clean up this file from current session
-      await this.removeFileFromCurrentSession(fileId);
-
-    } catch (error) {
-      console.error('🚨 STREAMING CHATBOX: Error adding file to suspicious list:', error);
-    }
-  }
-
-  /**
-   * Remove problematic file from current session
-   * @param {string} fileId - File ID to remove
-   */
-  async removeFileFromCurrentSession(fileId) {
-    try {
-      let removedCount = 0;
-
-      // Remove from manually attached files
-      if (this.manuallyAttachedFiles && Array.isArray(this.manuallyAttachedFiles)) {
-        const originalLength = this.manuallyAttachedFiles.length;
-        this.manuallyAttachedFiles = this.manuallyAttachedFiles.filter(file => {
-          const currentFileId = file.geminiUri ? file.geminiUri.split('/').pop() : null;
-          return currentFileId !== fileId;
-        });
-        removedCount += originalLength - this.manuallyAttachedFiles.length;
-      }
-
-      // Remove from current message files
-      if (this.currentMessageFiles && Array.isArray(this.currentMessageFiles)) {
-        const originalLength = this.currentMessageFiles.length;
-        this.currentMessageFiles = this.currentMessageFiles.filter(file => {
-          const currentFileId = file.geminiUri ? file.geminiUri.split('/').pop() : null;
-          return currentFileId !== fileId;
-        });
-        removedCount += originalLength - this.currentMessageFiles.length;
-      }
-
-      // Remove from conversation history
-      for (const message of this.conversationHistory) {
-        if (message.parts) {
-          const originalLength = message.parts.length;
-          message.parts = message.parts.filter(part => {
-            if (part.fileData && part.fileData.fileUri) {
-              const currentFileId = part.fileData.fileUri.split('/').pop();
-              return currentFileId !== fileId;
-            }
-            return true;
-          });
-          removedCount += originalLength - message.parts.length;
-        }
-      }
-
-      if (removedCount > 0) {
-        console.log(`🧹 STREAMING CHATBOX: Removed ${removedCount} references to problematic file ID: ${fileId}`);
-
-        // Find the file name for user notification
-        let fileName = 'unknown file';
-        if (this.manuallyAttachedFiles) {
-          const problematicFile = this.manuallyAttachedFiles.find(file =>
-            file.geminiUri && file.geminiUri.includes(fileId)
-          );
-          if (problematicFile) {
-            fileName = problematicFile.name;
-          }
-        }
-
-        // Notify user about file removal
-        this.addMessage('system', `🔄 File cleanup: Removed inaccessible file "${fileName}" (ID: ${fileId}) from the current conversation. The file appears to have expired or requires refresh.`);
-      }
-
-    } catch (error) {
-      console.error('🚨 STREAMING CHATBOX: Error removing file from session:', error);
-    }
-  }
-
-  /**
-   * Proactively check file accessibility before API requests
-   * @param {Array} files - Files to check
-   * @returns {Array} - Accessible files only
-   */
-  async checkFileAccessibility(files) {
-    if (!files || !Array.isArray(files) || files.length === 0) {
-      return [];
-    }
-
-    const accessibleFiles = [];
-    const inaccessibleFiles = [];
-
-    for (const file of files) {
-      try {
-        if (!file.geminiUri) {
-          inaccessibleFiles.push({ file, reason: 'No Gemini URI' });
-          continue;
-        }
-
-        // Quick accessibility check using HEAD request
-        const fileId = file.geminiUri.split('/').pop();
-        const apiKey = await this.getCurrentApiKey();
-
-        if (!apiKey) {
-          inaccessibleFiles.push({ file, reason: 'No API key available' });
-          continue;
-        }
-
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/files/${fileId}?key=${apiKey}`, {
-          method: 'HEAD',
-          signal: AbortSignal.timeout(3000)
-        });
-
-        if (response.ok) {
-          accessibleFiles.push(file);
-        } else {
-          inaccessibleFiles.push({ file, reason: `HTTP ${response.status}` });
-        }
-
-      } catch (error) {
-        inaccessibleFiles.push({ file, reason: error.message });
-      }
-    }
-
-    // Notify user about inaccessible files
-    if (inaccessibleFiles.length > 0) {
-      let message = `⚠️ File accessibility check found ${inaccessibleFiles.length} inaccessible file(s):\n`;
-      inaccessibleFiles.forEach(({ file, reason }) => {
-        message += `• ${file.name} - ${reason}\n`;
-      });
-      message += '\nThese files will be excluded from the request. Please refresh or re-upload them if needed.';
-
-      this.addMessage('system', message);
-    }
-
-    return accessibleFiles;
-  }
-
-  /**
-   * Get current API key for file operations
-   */
-  async getCurrentApiKey() {
-    try {
-      if (window.geminiApiManager) {
-        return await window.geminiApiManager.getCurrentApiKey();
-      }
-
-      if (window.apiKeyManager && window.apiKeyManager.initialized) {
-        const keyData = window.apiKeyManager.getKeyForSession('file-check');
-        return keyData ? keyData.key : null;
-      }
-
-      return null;
-    } catch (error) {
-      console.warn('StreamingChatbox: Error getting API key for file check:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Test if a specific file is accessible via API
-   * @param {Object} file - File object to test
-   * @returns {boolean} - True if accessible, false otherwise
-   */
-  async testFileAccessibility(file) {
-    try {
-      if (!file.geminiUri) {
-        return false;
-      }
-
-      const fileId = file.geminiUri.split('/').pop();
-      const apiKey = await this.getCurrentApiKey();
-
-      if (!apiKey) {
-        console.warn('StreamingChatbox: No API key available for accessibility test');
-        return false;
-      }
-
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/files/${fileId}?key=${apiKey}`, {
-        method: 'HEAD',
-        signal: AbortSignal.timeout(5000)
-      });
-
-      const isAccessible = response.ok;
-      console.log(`🔍 StreamingChatbox: File accessibility test for ${file.name} (${fileId}): ${isAccessible ? 'PASS' : 'FAIL'}`);
-
-      return isAccessible;
-    } catch (error) {
-      console.warn('StreamingChatbox: File accessibility test failed:', error.message);
-      return false;
-    }
-  }
-
-  /**
-   * Check if a file ID has been problematic before
-   * @param {string} fileId - File ID to check
-   * @returns {boolean} - True if file has caused issues before
-   */
-  hasFileBeenProblematic(fileId) {
-    // Check if file ID is in our suspicious list or matches known problematic patterns
-    return this.suspiciousFileIds && this.suspiciousFileIds.has(fileId);
   }
 
   /**
@@ -980,126 +708,11 @@ class StreamingChatbox {
   }
 
   /**
-   * Validate files before API call to prevent stale file errors
-   * @param {Array} files - Files to validate
-   * @returns {Array} - Valid files only
-   */
-  async validateFilesBeforeAPICall(files) {
-    if (!files || !Array.isArray(files)) {
-      return [];
-    }
-
-    const validFiles = [];
-
-    // Initialize suspicious files list with confirmed problematic files
-    if (!this.suspiciousFileIds) {
-      this.suspiciousFileIds = new Set([
-        'wrpdb7uq3ddk',  // Original problematic file
-        '46vm361k1btt'   // portfolio.md file causing 403 permission errors
-      ]);
-    }
-
-    for (const file of files) {
-      try {
-        // Check for truly suspicious file IDs (only confirmed problematic ones)
-        if (file.geminiUri) {
-          const fileId = file.geminiUri.split('/').pop();
-          if (this.suspiciousFileIds.has(fileId)) {
-            console.warn('🚨 StreamingChatbox: Skipping confirmed problematic file ID:', fileId, 'from file:', file.name);
-            continue;
-          }
-        }
-
-        // Validate URI format
-        if (!file.geminiUri || !file.geminiUri.startsWith('https://generativelanguage.googleapis.com/v1beta/files/')) {
-          console.warn('🚨 StreamingChatbox: Invalid file URI format:', file.geminiUri);
-          continue;
-        }
-
-        // Check if file has required properties
-        if (!file.name || !file.mimeType) {
-          console.warn('🚨 StreamingChatbox: File missing required properties:', file);
-          continue;
-        }
-
-        // Check if file is expired using knowledge base manager
-        if (window.knowledgeBaseManager && typeof window.knowledgeBaseManager.isFileExpired === 'function') {
-          const isExpired = await window.knowledgeBaseManager.isFileExpired(file);
-          if (isExpired) {
-            console.warn('🚨 StreamingChatbox: File is expired:', file.name);
-            continue;
-          }
-        }
-
-        // Check for truly suspicious file IDs (only confirmed problematic ones)
-        if (file.geminiUri) {
-          const fileId = file.geminiUri.split('/').pop();
-          if (this.suspiciousFileIds.has(fileId)) {
-            console.warn('🚨 StreamingChatbox: Skipping confirmed problematic file ID:', fileId, 'from file:', file.name);
-            continue;
-          }
-        }
-
-        validFiles.push(file);
-      } catch (error) {
-        console.error('🚨 StreamingChatbox: Error validating file:', file, error);
-      }
-    }
-
-    console.log(`🔍 StreamingChatbox: File validation complete. ${files.length} → ${validFiles.length} files`);
-
-    // Provide user feedback if files were filtered out
-    if (files.length > validFiles.length) {
-      const filteredCount = files.length - validFiles.length;
-      const filteredFiles = files.filter(file => !validFiles.includes(file));
-
-      console.log(`⚠️ StreamingChatbox: ${filteredCount} file(s) were filtered out due to known issues`);
-      console.log('Filtered files:', filteredFiles.map(f => f.name));
-
-      // Show a clear notification to the user
-      this.showFileFilterNotification(filteredCount, filteredFiles);
-    }
-
-    return validFiles;
-  }
-
-
-
-  /**
-   * Show notification to user when files are filtered out
-   * @param {number} filteredCount - Number of files filtered out
-   * @param {Array} filteredFiles - Array of filtered file objects
-   */
-  showFileFilterNotification(filteredCount, filteredFiles = []) {
-    try {
-      // Create honest message about filtered files
-      let notificationMessage = `🚫 ${filteredCount} file(s) were excluded due to known permission issues:\n`;
-
-      filteredFiles.forEach(file => {
-        const fileId = file.geminiUri ? file.geminiUri.split('/').pop() : 'unknown';
-        notificationMessage += `• ${file.name} (ID: ${fileId}) - causes 403 permission errors\n`;
-      });
-
-      notificationMessage += '\nThese files have been confirmed to be inaccessible and are excluded to prevent API errors. The AI will work with available files only.';
-
-      // Add as a system message
-      this.addMessage('system', notificationMessage);
-
-    } catch (error) {
-      console.warn('StreamingChatbox: Error showing file filter notification:', error);
-    }
-  }
-
-
-
-  /**
    * Set manually attached files
    * @param {Array} files - Manually attached files
    */
-  async setManuallyAttachedFiles(files) {
-    // Validate files before setting them
-    const validFiles = await this.validateFilesBeforeAPICall(files || []);
-    this.manuallyAttachedFiles = validFiles;
+  setManuallyAttachedFiles(files) {
+    this.manuallyAttachedFiles = files || [];
     console.log('aiFiverr StreamingChatbox: Manually attached files set:', this.manuallyAttachedFiles.length);
 
     // DEBUG: Log detailed file information for context transfer debugging
@@ -1405,12 +1018,6 @@ class StreamingChatbox {
 
     console.log('aiFiverr StreamingChatbox: Adding user message to conversation');
 
-    // CRITICAL: Restore context from previous failed request (for 503 retries)
-    const contextRestored = this.restoreContextFromRetry();
-    if (contextRestored) {
-      console.log('🔄 STREAMING CHATBOX: Context restored from previous 503 error - file attachments preserved');
-    }
-
     // FIXED: Always build context for follow-up messages to maintain conversation continuity
     // This ensures contextual responses even for simple messages like "thanks", "explain more", etc.
     let processedMessage = message;
@@ -1511,7 +1118,7 @@ class StreamingChatbox {
 
         // If no key for this session, get any available key but mark the session
         if (!apiKey) {
-          const newKeyData = window.apiKeyManager.getNextHealthyKey();
+          const newKeyData = window.apiKeyManager.getNextKey();
           if (newKeyData) {
             apiKey = newKeyData.key;
             // Associate this key with our session to maintain consistency
@@ -1538,40 +1145,11 @@ class StreamingChatbox {
     // Build complete conversation context
     const contents = [];
 
-    // Add conversation history with file validation
-    // Initialize suspicious files list with only confirmed problematic files
-    if (!this.suspiciousFileIds) {
-      this.suspiciousFileIds = new Set(['wrpdb7uq3ddk']);
-    }
-
+    // Add conversation history
     for (const message of this.conversationHistory) {
-      // Filter out any stale file references from message parts
-      const cleanParts = [];
-
-      for (const part of message.parts) {
-        if (part.fileData && part.fileData.fileUri) {
-          const fileId = part.fileData.fileUri.split('/').pop();
-
-          // Check against dynamic suspicious file IDs
-          if (this.suspiciousFileIds.has(fileId)) {
-            console.log('🚫 STREAMING CHATBOX: Filtering out suspicious file from conversation history:', fileId);
-            continue; // Skip this file part
-          }
-
-          // Check for extremely short file IDs (likely invalid)
-          if (fileId.length < 8) {
-            console.log('🚫 STREAMING CHATBOX: Filtering out invalid file ID from conversation history:', fileId);
-            continue; // Skip this file part
-          }
-        }
-
-        // Keep this part (either not a file or a valid file)
-        cleanParts.push(part);
-      }
-
       contents.push({
         role: message.role === 'model' ? 'model' : 'user',
-        parts: cleanParts
+        parts: message.parts
       });
     }
 
@@ -1604,16 +1182,9 @@ class StreamingChatbox {
     }
 
     // REMOVED: No longer automatically include all knowledge base files
-    console.log('aiFiverr StreamingChatbox: Total files to include before validation:', knowledgeBaseFiles.length);
+    console.log('aiFiverr StreamingChatbox: Total files to include:', knowledgeBaseFiles.length);
 
-    // CRITICAL: Validate files before adding to API payload
-    if (knowledgeBaseFiles.length > 0) {
-      console.log('🔍 STREAMING CHATBOX: Validating files before API call...');
-      knowledgeBaseFiles = await this.validateFilesBeforeAPICall(knowledgeBaseFiles);
-      console.log('✅ STREAMING CHATBOX: File validation complete. Valid files:', knowledgeBaseFiles.length);
-    }
-
-    // Add validated files to the last user message if available
+    // Add files to the last user message if available
     if (knowledgeBaseFiles.length > 0 && contents.length > 0) {
       const lastUserMessage = contents[contents.length - 1];
       if (lastUserMessage.role === 'user') {
@@ -1625,7 +1196,7 @@ class StreamingChatbox {
                 mimeType: file.mimeType || 'text/plain'
               }
             });
-            console.log('aiFiverr StreamingChatbox: Added validated file to message:', file.name);
+            console.log('aiFiverr StreamingChatbox: Added file to message:', file.name);
           }
         }
       }
@@ -1663,69 +1234,16 @@ class StreamingChatbox {
 
     if (!response.ok) {
       let errorMessage = `Gemini streaming API error: ${response.status} - ${response.statusText}`;
-      let isFilePermissionError = false;
-
       try {
         const errorData = await response.json();
         if (errorData.error?.message) {
           errorMessage = `Gemini API error: ${errorData.error.message}`;
-
-          // Check if this is a file permission error
-          if (errorData.error.message.includes('You do not have permission to access the File') ||
-              errorData.error.message.includes('or it may not exist')) {
-            isFilePermissionError = true;
-            console.error('🚨 STREAMING CHATBOX: File permission error detected:', errorData.error.message);
-
-            // Extract file ID from error message if possible
-            const fileIdMatch = errorData.error.message.match(/File (\w+)/);
-            if (fileIdMatch) {
-              const problematicFileId = fileIdMatch[1];
-              console.error('🚨 STREAMING CHATBOX: File permission error for file ID:', problematicFileId);
-
-              // Only add to blacklist if it's a confirmed problematic file (not just expired)
-              if (problematicFileId === 'wrpdb7uq3ddk') {
-                console.log('🚫 STREAMING CHATBOX: Adding confirmed problematic file to blacklist:', problematicFileId);
-                await this.addToSuspiciousFilesList(problematicFileId);
-              } else {
-                console.log('⚠️ STREAMING CHATBOX: File may be expired or need refresh, not blacklisting:', problematicFileId);
-                // Clean up this file from current session but don't permanently blacklist
-                await this.removeFileFromCurrentSession(problematicFileId);
-              }
-            }
-          }
         }
       } catch (e) {
         // If we can't parse the error response, use the status text
       }
-
       console.error('aiFiverr StreamingChatbox: API request failed:', errorMessage);
-
-      // Handle different types of errors appropriately
-      if (isFilePermissionError) {
-        // Provide detailed user-friendly error message for file permission issues
-        const fileIdMatch = errorMessage.match(/File (\w+)/);
-        const fileId = fileIdMatch ? fileIdMatch[1] : 'unknown';
-
-        // Find the file name from our current session
-        let fileName = 'unknown file';
-        if (this.manuallyAttachedFiles) {
-          const problematicFile = this.manuallyAttachedFiles.find(file =>
-            file.geminiUri && file.geminiUri.includes(fileId)
-          );
-          if (problematicFile) {
-            fileName = problematicFile.name;
-          }
-        }
-
-        throw new Error(`File access error: ${fileName} (ID: ${fileId}) is no longer accessible. This usually means the file has expired or was uploaded with a different API key. Please refresh or re-upload the file in your knowledge base and try again.`);
-      } else if (response.status === 503) {
-        // Handle 503 Service Unavailable - preserve context for retry
-        console.log('🔄 STREAMING CHATBOX: 503 Service Unavailable - preserving context for retry');
-        this.preserveContextForRetry();
-        throw new Error('The AI service is temporarily overloaded. Please try again in a moment. Your message and file attachments have been preserved.');
-      } else {
-        throw new Error(errorMessage);
-      }
+      throw new Error(errorMessage);
     }
 
     console.log('aiFiverr StreamingChatbox: API request successful, starting stream processing');
@@ -2370,114 +1888,6 @@ class StreamingChatbox {
   }
 
   /**
-   * Preserve context for retry after 503 Service Unavailable errors
-   */
-  preserveContextForRetry() {
-    try {
-      // Store the current request context for retry
-      this.retryContext = {
-        manuallyAttachedFiles: this.manuallyAttachedFiles ? [...this.manuallyAttachedFiles] : [],
-        currentMessageFiles: this.currentMessageFiles ? [...this.currentMessageFiles] : [],
-        originalPromptContext: this.originalPromptContext ? { ...this.originalPromptContext } : null,
-        originalVariableUsage: this.originalVariableUsage ? [...this.originalVariableUsage] : [],
-        timestamp: Date.now()
-      };
-
-      console.log('🔄 STREAMING CHATBOX: Context preserved for retry:', {
-        manuallyAttachedFiles: this.retryContext.manuallyAttachedFiles.length,
-        currentMessageFiles: this.retryContext.currentMessageFiles.length,
-        hasOriginalContext: !!this.retryContext.originalPromptContext,
-        variableUsage: this.retryContext.originalVariableUsage.length
-      });
-
-    } catch (error) {
-      console.error('🚨 STREAMING CHATBOX: Error preserving context for retry:', error);
-    }
-  }
-
-  /**
-   * Restore context from previous failed request (for 503 retries)
-   */
-  restoreContextFromRetry() {
-    try {
-      if (!this.retryContext) {
-        console.log('🔄 STREAMING CHATBOX: No retry context available');
-        return false;
-      }
-
-      // Check if retry context is not too old (within 5 minutes)
-      const fiveMinutes = 5 * 60 * 1000;
-      if (Date.now() - this.retryContext.timestamp > fiveMinutes) {
-        console.log('🔄 STREAMING CHATBOX: Retry context expired, not restoring');
-        this.retryContext = null;
-        return false;
-      }
-
-      // Restore file attachments
-      if (this.retryContext.manuallyAttachedFiles.length > 0) {
-        this.manuallyAttachedFiles = [...this.retryContext.manuallyAttachedFiles];
-        console.log('🔄 STREAMING CHATBOX: Restored manually attached files:', this.manuallyAttachedFiles.length);
-      }
-
-      if (this.retryContext.currentMessageFiles.length > 0) {
-        this.currentMessageFiles = [...this.retryContext.currentMessageFiles];
-        console.log('🔄 STREAMING CHATBOX: Restored current message files:', this.currentMessageFiles.length);
-      }
-
-      // Restore original context
-      if (this.retryContext.originalPromptContext) {
-        this.originalPromptContext = { ...this.retryContext.originalPromptContext };
-        console.log('🔄 STREAMING CHATBOX: Restored original prompt context');
-      }
-
-      if (this.retryContext.originalVariableUsage.length > 0) {
-        this.originalVariableUsage = [...this.retryContext.originalVariableUsage];
-        console.log('🔄 STREAMING CHATBOX: Restored original variable usage:', this.originalVariableUsage);
-      }
-
-      // Clear retry context after successful restoration
-      this.retryContext = null;
-      return true;
-
-    } catch (error) {
-      console.error('🚨 STREAMING CHATBOX: Error restoring context from retry:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Handle API key rotation issues that might affect file accessibility
-   */
-  async handleApiKeyRotation() {
-    try {
-      console.log('🔄 STREAMING CHATBOX: Checking for API key rotation issues...');
-
-      // If we have manually attached files, test their accessibility with current API key
-      if (this.manuallyAttachedFiles && this.manuallyAttachedFiles.length > 0) {
-        console.log('🔍 STREAMING CHATBOX: Testing file accessibility after potential API key rotation');
-
-        const accessibleFiles = await this.checkFileAccessibility(this.manuallyAttachedFiles);
-
-        if (accessibleFiles.length !== this.manuallyAttachedFiles.length) {
-          console.log(`🔄 STREAMING CHATBOX: API key rotation detected - ${this.manuallyAttachedFiles.length - accessibleFiles.length} files no longer accessible`);
-          this.manuallyAttachedFiles = accessibleFiles;
-
-          // Notify user about file accessibility changes
-          if (accessibleFiles.length === 0) {
-            this.addMessage('system', '⚠️ API key rotation detected. Previously attached files are no longer accessible. Please re-attach your files if needed.');
-          } else {
-            const lostCount = this.manuallyAttachedFiles.length - accessibleFiles.length;
-            this.addMessage('system', `⚠️ API key rotation detected. ${lostCount} file(s) are no longer accessible and have been removed from the conversation.`);
-          }
-        }
-      }
-
-    } catch (error) {
-      console.error('🚨 STREAMING CHATBOX: Error handling API key rotation:', error);
-    }
-  }
-
-  /**
    * Handle streaming errors with better user feedback
    */
   handleStreamingError(error) {
@@ -2488,22 +1898,15 @@ class StreamingChatbox {
       if (contentDiv) {
         let errorMessage = '❌ Error: ';
 
-        // FIXED: Check for file access errors FIRST to prevent API key confusion
-        if (error.message.includes('File access error:') || error.message.includes('no longer accessible')) {
-          // File permission errors should display as-is with proper context
-          errorMessage += error.message.replace('File access error: ', '');
-        } else if (error.message.includes('No API key available') || error.message.includes('Failed to retrieve API key')) {
-          // Only show API key configuration error for actual API key issues
+        // Provide more specific error messages
+        if (error.message.includes('API key')) {
           errorMessage += 'API key not configured. Please set up your Gemini API key in the extension settings.';
         } else if (error.message.includes('401')) {
           errorMessage += 'Invalid API key. Please check your Gemini API key in the extension settings.';
-        } else if (error.message.includes('403') && !error.message.includes('File access error')) {
-          // Only show generic 403 message if it's NOT a file permission error
+        } else if (error.message.includes('403')) {
           errorMessage += 'API access forbidden. Please check your API key permissions.';
         } else if (error.message.includes('429')) {
           errorMessage += 'Rate limit exceeded. Please wait a moment and try again.';
-        } else if (error.message.includes('503') || error.message.includes('Service Unavailable') || error.message.includes('overloaded')) {
-          errorMessage += 'The AI service is temporarily overloaded. Your message and file attachments have been preserved. Please try again in a moment.';
         } else if (error.message.includes('network') || error.message.includes('fetch')) {
           errorMessage += 'Network error. Please check your internet connection and try again.';
         } else {
