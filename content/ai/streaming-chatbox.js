@@ -850,18 +850,18 @@ class StreamingChatbox {
 
     const validFiles = [];
 
-    // Initialize suspicious files list if not already done
+    // Initialize suspicious files list with only truly problematic files
     if (!this.suspiciousFileIds) {
-      this.suspiciousFileIds = new Set(['wrpdb7uq3ddk', '46vm361k1btt']);
+      this.suspiciousFileIds = new Set(['wrpdb7uq3ddk']); // Only keep confirmed problematic files
     }
 
     for (const file of files) {
       try {
-        // Check for suspicious file IDs using dynamic list
+        // Check for truly suspicious file IDs (only confirmed problematic ones)
         if (file.geminiUri) {
           const fileId = file.geminiUri.split('/').pop();
           if (this.suspiciousFileIds.has(fileId)) {
-            console.warn('🚨 StreamingChatbox: Skipping suspicious file ID:', fileId, 'from file:', file.name);
+            console.warn('🚨 StreamingChatbox: Skipping confirmed problematic file ID:', fileId, 'from file:', file.name);
             continue;
           }
         }
@@ -887,6 +887,19 @@ class StreamingChatbox {
           }
         }
 
+        // Test file accessibility for files that previously caused issues
+        const fileId = file.geminiUri.split('/').pop();
+        if (fileId === '46vm361k1btt') {
+          console.log('🔍 StreamingChatbox: Testing accessibility for previously problematic file:', file.name);
+          const isAccessible = await this.testFileAccessibility(file);
+          if (!isAccessible) {
+            console.warn('🚨 StreamingChatbox: File is not accessible, skipping:', file.name);
+            continue;
+          } else {
+            console.log('✅ StreamingChatbox: File is accessible, including in request:', file.name);
+          }
+        }
+
         validFiles.push(file);
       } catch (error) {
         console.error('🚨 StreamingChatbox: Error validating file:', file, error);
@@ -894,7 +907,100 @@ class StreamingChatbox {
     }
 
     console.log(`🔍 StreamingChatbox: File validation complete. ${files.length} → ${validFiles.length} files`);
+
+    // Provide user feedback if files were filtered out
+    if (files.length > validFiles.length) {
+      const filteredCount = files.length - validFiles.length;
+      const filteredFiles = files.filter(file => !validFiles.includes(file));
+
+      console.log(`⚠️ StreamingChatbox: ${filteredCount} file(s) were filtered out due to accessibility issues`);
+      console.log('Filtered files:', filteredFiles.map(f => f.name));
+
+      // Show a subtle notification to the user
+      this.showFileFilterNotification(filteredCount, filteredFiles);
+    }
+
     return validFiles;
+  }
+
+  /**
+   * Show notification to user when files are filtered out
+   * @param {number} filteredCount - Number of files filtered out
+   * @param {Array} filteredFiles - Array of filtered file objects
+   */
+  showFileFilterNotification(filteredCount, filteredFiles = []) {
+    try {
+      // Create detailed message about filtered files
+      let notificationMessage = `⚠️ ${filteredCount} file(s) were not included due to accessibility issues:\n`;
+
+      filteredFiles.forEach(file => {
+        notificationMessage += `• ${file.name} (may have expired or need refresh)\n`;
+      });
+
+      notificationMessage += '\nThe AI response will be based on available context only. To include these files, please refresh them in your knowledge base.';
+
+      // Add as a system message
+      this.addMessage('system', notificationMessage);
+
+    } catch (error) {
+      console.warn('StreamingChatbox: Error showing file filter notification:', error);
+    }
+  }
+
+  /**
+   * Test if a file is accessible before including it in API requests
+   * @param {Object} file - File to test
+   * @returns {boolean} - True if file is accessible
+   */
+  async testFileAccessibility(file) {
+    try {
+      if (!file.geminiUri || !window.geminiApiManager) {
+        return false;
+      }
+
+      // Get current API key
+      const apiKey = await window.geminiApiManager.getCurrentApiKey();
+      if (!apiKey) {
+        console.warn('🚨 StreamingChatbox: No API key available for file accessibility test');
+        return false;
+      }
+
+      // Extract file name from URI
+      const fileName = file.geminiUri.split('/').pop();
+
+      // Test file accessibility with a simple GET request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/files/${fileName}?key=${apiKey}`, {
+        method: 'GET',
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const fileInfo = await response.json();
+        const isActive = fileInfo.state === 'ACTIVE';
+        console.log(`🔍 StreamingChatbox: File accessibility test for ${file.name}:`, {
+          status: response.status,
+          state: fileInfo.state,
+          isActive
+        });
+        return isActive;
+      } else {
+        console.warn(`🚨 StreamingChatbox: File accessibility test failed for ${file.name}:`, response.status, response.statusText);
+        return false;
+      }
+
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.warn(`🚨 StreamingChatbox: File accessibility test timed out for ${file.name}`);
+      } else {
+        console.warn(`🚨 StreamingChatbox: File accessibility test error for ${file.name}:`, error.message);
+      }
+      return false;
+    }
   }
 
   /**
@@ -1338,9 +1444,9 @@ class StreamingChatbox {
     const contents = [];
 
     // Add conversation history with file validation
-    // Initialize suspicious files list if not already done
+    // Initialize suspicious files list with only confirmed problematic files
     if (!this.suspiciousFileIds) {
-      this.suspiciousFileIds = new Set(['wrpdb7uq3ddk', '46vm361k1btt']);
+      this.suspiciousFileIds = new Set(['wrpdb7uq3ddk']);
     }
 
     for (const message of this.conversationHistory) {
@@ -1479,10 +1585,17 @@ class StreamingChatbox {
             const fileIdMatch = errorData.error.message.match(/File (\w+)/);
             if (fileIdMatch) {
               const problematicFileId = fileIdMatch[1];
-              console.error('🚨 STREAMING CHATBOX: Problematic file ID:', problematicFileId);
+              console.error('🚨 STREAMING CHATBOX: File permission error for file ID:', problematicFileId);
 
-              // Add to suspicious files list for future prevention
-              await this.addToSuspiciousFilesList(problematicFileId);
+              // Only add to blacklist if it's a confirmed problematic file (not just expired)
+              if (problematicFileId === 'wrpdb7uq3ddk') {
+                console.log('🚫 STREAMING CHATBOX: Adding confirmed problematic file to blacklist:', problematicFileId);
+                await this.addToSuspiciousFilesList(problematicFileId);
+              } else {
+                console.log('⚠️ STREAMING CHATBOX: File may be expired or need refresh, not blacklisting:', problematicFileId);
+                // Clean up this file from current session but don't permanently blacklist
+                await this.removeFileFromCurrentSession(problematicFileId);
+              }
             }
           }
         }
