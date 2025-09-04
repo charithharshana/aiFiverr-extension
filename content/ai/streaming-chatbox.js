@@ -31,6 +31,9 @@ class StreamingChatbox {
     this.originalVariableUsage = null; // Stores which variables were used in original prompt
     this.manuallyAttachedFiles = []; // Stores manually attached files
 
+    // NEW: Retry context preservation for 503 Service Unavailable errors
+    this.retryContext = null; // Stores context for retry after 503 errors
+
     // Split initialization for better timing control
     this.initSync();
     this.initAsync().catch(error => {
@@ -1316,6 +1319,12 @@ class StreamingChatbox {
 
     console.log('aiFiverr StreamingChatbox: Adding user message to conversation');
 
+    // CRITICAL: Restore context from previous failed request (for 503 retries)
+    const contextRestored = this.restoreContextFromRetry();
+    if (contextRestored) {
+      console.log('🔄 STREAMING CHATBOX: Context restored from previous 503 error - file attachments preserved');
+    }
+
     // FIXED: Always build context for follow-up messages to maintain conversation continuity
     // This ensures contextual responses even for simple messages like "thanks", "explain more", etc.
     let processedMessage = message;
@@ -1605,9 +1614,15 @@ class StreamingChatbox {
 
       console.error('aiFiverr StreamingChatbox: API request failed:', errorMessage);
 
+      // Handle different types of errors appropriately
       if (isFilePermissionError) {
         // Provide user-friendly error message for file permission issues
         throw new Error('Some attached files are no longer accessible. Please refresh your files and try again.');
+      } else if (response.status === 503) {
+        // Handle 503 Service Unavailable - preserve context for retry
+        console.log('🔄 STREAMING CHATBOX: 503 Service Unavailable - preserving context for retry');
+        this.preserveContextForRetry();
+        throw new Error('The AI service is temporarily overloaded. Please try again in a moment. Your message and file attachments have been preserved.');
       } else {
         throw new Error(errorMessage);
       }
@@ -2255,6 +2270,122 @@ class StreamingChatbox {
   }
 
   /**
+   * Preserve context for retry after 503 Service Unavailable errors
+   */
+  preserveContextForRetry() {
+    try {
+      // Store the current request context for retry
+      this.retryContext = {
+        manuallyAttachedFiles: this.manuallyAttachedFiles ? [...this.manuallyAttachedFiles] : [],
+        currentMessageFiles: this.currentMessageFiles ? [...this.currentMessageFiles] : [],
+        originalPromptContext: this.originalPromptContext ? { ...this.originalPromptContext } : null,
+        originalVariableUsage: this.originalVariableUsage ? [...this.originalVariableUsage] : [],
+        timestamp: Date.now()
+      };
+
+      console.log('🔄 STREAMING CHATBOX: Context preserved for retry:', {
+        manuallyAttachedFiles: this.retryContext.manuallyAttachedFiles.length,
+        currentMessageFiles: this.retryContext.currentMessageFiles.length,
+        hasOriginalContext: !!this.retryContext.originalPromptContext,
+        variableUsage: this.retryContext.originalVariableUsage.length
+      });
+
+    } catch (error) {
+      console.error('🚨 STREAMING CHATBOX: Error preserving context for retry:', error);
+    }
+  }
+
+  /**
+   * Restore context from previous failed request (for 503 retries)
+   */
+  restoreContextFromRetry() {
+    try {
+      if (!this.retryContext) {
+        console.log('🔄 STREAMING CHATBOX: No retry context available');
+        return false;
+      }
+
+      // Check if retry context is not too old (within 5 minutes)
+      const fiveMinutes = 5 * 60 * 1000;
+      if (Date.now() - this.retryContext.timestamp > fiveMinutes) {
+        console.log('🔄 STREAMING CHATBOX: Retry context expired, not restoring');
+        this.retryContext = null;
+        return false;
+      }
+
+      // Restore file attachments
+      if (this.retryContext.manuallyAttachedFiles.length > 0) {
+        this.manuallyAttachedFiles = [...this.retryContext.manuallyAttachedFiles];
+        console.log('🔄 STREAMING CHATBOX: Restored manually attached files:', this.manuallyAttachedFiles.length);
+      }
+
+      if (this.retryContext.currentMessageFiles.length > 0) {
+        this.currentMessageFiles = [...this.retryContext.currentMessageFiles];
+        console.log('🔄 STREAMING CHATBOX: Restored current message files:', this.currentMessageFiles.length);
+      }
+
+      // Restore original context
+      if (this.retryContext.originalPromptContext) {
+        this.originalPromptContext = { ...this.retryContext.originalPromptContext };
+        console.log('🔄 STREAMING CHATBOX: Restored original prompt context');
+      }
+
+      if (this.retryContext.originalVariableUsage.length > 0) {
+        this.originalVariableUsage = [...this.retryContext.originalVariableUsage];
+        console.log('🔄 STREAMING CHATBOX: Restored original variable usage:', this.originalVariableUsage);
+      }
+
+      // Clear retry context after successful restoration
+      this.retryContext = null;
+      return true;
+
+    } catch (error) {
+      console.error('🚨 STREAMING CHATBOX: Error restoring context from retry:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Handle API key rotation issues that might affect file accessibility
+   */
+  async handleApiKeyRotation() {
+    try {
+      console.log('🔄 STREAMING CHATBOX: Checking for API key rotation issues...');
+
+      // If we have manually attached files, test their accessibility with current API key
+      if (this.manuallyAttachedFiles && this.manuallyAttachedFiles.length > 0) {
+        console.log('🔍 STREAMING CHATBOX: Testing file accessibility after potential API key rotation');
+
+        const accessibleFiles = [];
+        for (const file of this.manuallyAttachedFiles) {
+          const isAccessible = await this.testFileAccessibility(file);
+          if (isAccessible) {
+            accessibleFiles.push(file);
+          } else {
+            console.warn('🚨 STREAMING CHATBOX: File no longer accessible after API key rotation:', file.name);
+          }
+        }
+
+        if (accessibleFiles.length !== this.manuallyAttachedFiles.length) {
+          console.log(`🔄 STREAMING CHATBOX: API key rotation detected - ${this.manuallyAttachedFiles.length - accessibleFiles.length} files no longer accessible`);
+          this.manuallyAttachedFiles = accessibleFiles;
+
+          // Notify user about file accessibility changes
+          if (accessibleFiles.length === 0) {
+            this.addMessage('system', '⚠️ API key rotation detected. Previously attached files are no longer accessible. Please re-attach your files if needed.');
+          } else {
+            const lostCount = this.manuallyAttachedFiles.length - accessibleFiles.length;
+            this.addMessage('system', `⚠️ API key rotation detected. ${lostCount} file(s) are no longer accessible and have been removed from the conversation.`);
+          }
+        }
+      }
+
+    } catch (error) {
+      console.error('🚨 STREAMING CHATBOX: Error handling API key rotation:', error);
+    }
+  }
+
+  /**
    * Handle streaming errors with better user feedback
    */
   handleStreamingError(error) {
@@ -2274,6 +2405,8 @@ class StreamingChatbox {
           errorMessage += 'API access forbidden. Please check your API key permissions.';
         } else if (error.message.includes('429')) {
           errorMessage += 'Rate limit exceeded. Please wait a moment and try again.';
+        } else if (error.message.includes('503') || error.message.includes('Service Unavailable') || error.message.includes('overloaded')) {
+          errorMessage += 'The AI service is temporarily overloaded. Your message and file attachments have been preserved. Please try again in a moment.';
         } else if (error.message.includes('network') || error.message.includes('fetch')) {
           errorMessage += 'Network error. Please check your internet connection and try again.';
         } else {
