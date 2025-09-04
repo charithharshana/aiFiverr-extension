@@ -142,7 +142,7 @@ class APIKeyManager {
     if (this.sessionKeys.has(sessionId)) {
       const keyIndex = this.sessionKeys.get(sessionId);
       const keyHealth = this.keyHealth.get(keyIndex);
-      
+
       // If the assigned key is still healthy, use it
       if (keyHealth?.isHealthy && !keyHealth?.quotaExhausted) {
         return {
@@ -157,8 +157,24 @@ class APIKeyManager {
     if (keyData) {
       this.sessionKeys.set(sessionId, keyData.index);
     }
-    
+
     return keyData;
+  }
+
+  /**
+   * Set API key for a specific session (for consistency)
+   */
+  setSessionKey(sessionId, apiKey) {
+    // Find the index of the provided API key
+    const keyIndex = this.keys.indexOf(apiKey);
+    if (keyIndex !== -1) {
+      this.sessionKeys.set(sessionId, keyIndex);
+      console.log(`aiFiverr APIKeyManager: Set session '${sessionId}' to use key index ${keyIndex}`);
+      return true;
+    } else {
+      console.warn(`aiFiverr APIKeyManager: API key not found in keys array for session '${sessionId}'`);
+      return false;
+    }
   }
 
   /**

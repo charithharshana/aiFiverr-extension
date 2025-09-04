@@ -3572,29 +3572,47 @@ class TextSelector {
         return;
       }
 
-      // Get the current session key for streaming chat
-      const sessionId = 'streaming_chat';
-      let sessionKey = window.apiKeyManager.getKeyForSession(sessionId);
+      // CRITICAL FIX: Inherit API key from 'gemini' session to maintain file access consistency
+      const geminiSessionKey = window.apiKeyManager.getKeyForSession('gemini');
+      const streamingSessionId = 'streaming_chat';
 
-      if (!sessionKey) {
-        console.log('aiFiverr: No existing session key, creating new session');
-
-        // Try to get the same key that was used for the original request
-        // This could be stored in lastProcessedContext or retrieved from current session
-        const newKeyData = window.apiKeyManager.getNextKey();
-        if (newKeyData) {
-          window.apiKeyManager.setSessionKey(sessionId, newKeyData.key);
-          console.log('aiFiverr: New API key session established for streaming chat');
+      if (geminiSessionKey && geminiSessionKey.key) {
+        // Use the same API key from the initial request for streaming chat
+        const success = window.apiKeyManager.setSessionKey(streamingSessionId, geminiSessionKey.key);
+        if (success) {
+          console.log('aiFiverr: Successfully inherited API key from gemini session for streaming chat consistency');
         } else {
-          console.warn('aiFiverr: No API keys available for session');
+          console.warn('aiFiverr: Failed to set inherited API key for streaming chat session');
+          // Fallback to creating new session
+          this.createFallbackStreamingSession(streamingSessionId);
         }
       } else {
-        console.log('aiFiverr: Existing API key session found for streaming chat');
+        console.log('aiFiverr: No gemini session key found, creating new streaming session');
+        this.createFallbackStreamingSession(streamingSessionId);
       }
 
     } catch (error) {
       console.error('aiFiverr: Error ensuring API key session consistency:', error);
       // Don't fail the transition for API key issues, just log the error
+    }
+  }
+
+  /**
+   * Create fallback streaming session when gemini session key is not available
+   * @param {string} sessionId - The session ID for streaming chat
+   */
+  createFallbackStreamingSession(sessionId) {
+    try {
+      // Get any available healthy key for the streaming session
+      const newKeyData = window.apiKeyManager.getNextHealthyKey();
+      if (newKeyData) {
+        window.apiKeyManager.setSessionKey(sessionId, newKeyData.key);
+        console.log('aiFiverr: Created fallback API key session for streaming chat');
+      } else {
+        console.warn('aiFiverr: No healthy API keys available for streaming session');
+      }
+    } catch (error) {
+      console.error('aiFiverr: Error creating fallback streaming session:', error);
     }
   }
 

@@ -729,10 +729,25 @@ class KnowledgeBaseManager {
    * Add file reference to knowledge base
    */
   async addFileReference(key, fileData) {
+    // CRITICAL FIX: Track API key used for file upload to maintain access consistency
+    let uploadApiKey = null;
+    try {
+      if (window.apiKeyManager && window.apiKeyManager.initialized) {
+        const geminiKeyData = window.apiKeyManager.getKeyForSession('gemini');
+        uploadApiKey = geminiKeyData ? geminiKeyData.key : null;
+      }
+    } catch (error) {
+      console.warn('aiFiverr KB: Could not determine upload API key:', error);
+    }
+
     this.files.set(key, {
       ...fileData,
       addedAt: new Date().toISOString(),
-      type: 'file'
+      type: 'file',
+      // NEW: Track which API key was used to upload this file
+      uploadApiKey: uploadApiKey,
+      uploadApiKeyHash: uploadApiKey ? this.hashApiKey(uploadApiKey) : null,
+      uploadTimestamp: Date.now()
     });
     await this.saveKnowledgeBaseFiles();
   }
@@ -758,6 +773,95 @@ class KnowledgeBaseManager {
    */
   getAllFileReferences() {
     return Object.fromEntries(this.files);
+  }
+
+  /**
+   * Hash API key for secure storage (first 8 characters for identification)
+   */
+  hashApiKey(apiKey) {
+    if (!apiKey) return null;
+    return apiKey.substring(0, 8) + '...';
+  }
+
+  /**
+   * Get the API key that should be used to access a specific file
+   * @param {string} fileKey - The file key
+   * @returns {string|null} - The API key to use for this file
+   */
+  getFileAccessApiKey(fileKey) {
+    const fileRef = this.files.get(fileKey);
+    if (!fileRef || !fileRef.uploadApiKey) {
+      return null;
+    }
+
+    // Check if the file is expired (48 hours)
+    const uploadTime = fileRef.uploadTimestamp || 0;
+    const now = Date.now();
+    const fortyEightHours = 48 * 60 * 60 * 1000;
+
+    if (now - uploadTime > fortyEightHours) {
+      console.warn(`aiFiverr KB: File ${fileKey} has expired (uploaded ${new Date(uploadTime).toISOString()})`);
+      return null;
+    }
+
+    return fileRef.uploadApiKey;
+  }
+
+  /**
+   * Update file with new API key after refresh
+   * @param {string} fileKey - The file key
+   * @param {string} newApiKey - The new API key
+   * @param {string} newGeminiUri - The new Gemini URI
+   */
+  async updateFileApiKey(fileKey, newApiKey, newGeminiUri) {
+    const fileRef = this.files.get(fileKey);
+    if (!fileRef) {
+      console.warn(`aiFiverr KB: File ${fileKey} not found for API key update`);
+      return false;
+    }
+
+    // Update the file reference with new API key and URI
+    this.files.set(fileKey, {
+      ...fileRef,
+      uploadApiKey: newApiKey,
+      uploadApiKeyHash: this.hashApiKey(newApiKey),
+      uploadTimestamp: Date.now(),
+      geminiUri: newGeminiUri,
+      refreshedAt: new Date().toISOString()
+    });
+
+    await this.saveKnowledgeBaseFiles();
+    console.log(`aiFiverr KB: Updated API key for file ${fileKey}`);
+    return true;
+  }
+
+  /**
+   * Get files that need API key refresh (expired or using different key)
+   * @param {string} currentApiKey - The current API key being used
+   * @returns {Array} - Array of files that need refresh
+   */
+  getFilesNeedingRefresh(currentApiKey) {
+    const needRefresh = [];
+    const now = Date.now();
+    const fortyEightHours = 48 * 60 * 60 * 1000;
+
+    for (const [fileKey, fileRef] of this.files) {
+      if (!fileRef.geminiUri) continue;
+
+      const uploadTime = fileRef.uploadTimestamp || 0;
+      const isExpired = now - uploadTime > fortyEightHours;
+      const isDifferentKey = fileRef.uploadApiKey !== currentApiKey;
+
+      if (isExpired || isDifferentKey) {
+        needRefresh.push({
+          fileKey,
+          fileRef,
+          reason: isExpired ? 'expired' : 'different_key'
+        });
+      }
+    }
+
+    return needRefresh;
   }
 
   /**
@@ -1013,6 +1117,125 @@ class KnowledgeBaseManager {
     }, 30 * 60 * 1000); // 30 minutes
 
     console.log('aiFiverr KB: File lifecycle manager initialized');
+  }
+
+  /**
+   * Refresh expired or inaccessible files with new API key
+   * @param {string} newApiKey - The new API key to use
+   * @returns {Promise<Object>} - Refresh results
+   */
+  async refreshExpiredFiles(newApiKey) {
+    console.log('aiFiverr KB: Starting file refresh with new API key');
+
+    const results = {
+      total: 0,
+      refreshed: 0,
+      failed: 0,
+      errors: []
+    };
+
+    try {
+      const filesToRefresh = this.getFilesNeedingRefresh(newApiKey);
+      results.total = filesToRefresh.length;
+
+      if (filesToRefresh.length === 0) {
+        console.log('aiFiverr KB: No files need refresh');
+        return results;
+      }
+
+      console.log(`aiFiverr KB: Found ${filesToRefresh.length} files needing refresh`);
+
+      for (const { fileKey, fileRef, reason } of filesToRefresh) {
+        try {
+          console.log(`aiFiverr KB: Refreshing file ${fileKey} (reason: ${reason})`);
+
+          // Re-upload the file to Gemini with new API key
+          const refreshResult = await this.refreshSingleFile(fileKey, fileRef, newApiKey);
+
+          if (refreshResult.success) {
+            results.refreshed++;
+            console.log(`aiFiverr KB: Successfully refreshed file ${fileKey}`);
+          } else {
+            results.failed++;
+            results.errors.push(`${fileKey}: ${refreshResult.error}`);
+            console.error(`aiFiverr KB: Failed to refresh file ${fileKey}:`, refreshResult.error);
+          }
+        } catch (error) {
+          results.failed++;
+          results.errors.push(`${fileKey}: ${error.message}`);
+          console.error(`aiFiverr KB: Error refreshing file ${fileKey}:`, error);
+        }
+      }
+
+      console.log(`aiFiverr KB: File refresh complete. Refreshed: ${results.refreshed}, Failed: ${results.failed}`);
+      return results;
+
+    } catch (error) {
+      console.error('aiFiverr KB: Error during file refresh:', error);
+      results.errors.push(`General error: ${error.message}`);
+      return results;
+    }
+  }
+
+  /**
+   * Refresh a single file with new API key
+   * @param {string} fileKey - The file key
+   * @param {Object} fileRef - The file reference
+   * @param {string} newApiKey - The new API key
+   * @returns {Promise<Object>} - Refresh result
+   */
+  async refreshSingleFile(fileKey, fileRef, newApiKey) {
+    try {
+      // If the file has a Drive file ID, re-upload from Drive
+      if (fileRef.driveFileId) {
+        const refreshResult = await this.uploadFileToGemini({
+          name: fileRef.name,
+          mimeType: fileRef.mimeType,
+          size: fileRef.size,
+          driveFileId: fileRef.driveFileId
+        });
+
+        if (refreshResult && refreshResult.geminiUri) {
+          // Update the file reference with new API key and URI
+          await this.updateFileApiKey(fileKey, newApiKey, refreshResult.geminiUri);
+          return { success: true };
+        } else {
+          return { success: false, error: 'Failed to get new Gemini URI' };
+        }
+      } else {
+        return { success: false, error: 'No Drive file ID available for refresh' };
+      }
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Auto-refresh files when API key changes
+   * @param {string} newApiKey - The new API key being used
+   */
+  async autoRefreshFilesForNewApiKey(newApiKey) {
+    try {
+      const filesToRefresh = this.getFilesNeedingRefresh(newApiKey);
+
+      if (filesToRefresh.length > 0) {
+        console.log(`aiFiverr KB: Auto-refreshing ${filesToRefresh.length} files for new API key`);
+
+        // Refresh files in background (don't wait for completion)
+        this.refreshExpiredFiles(newApiKey).then(results => {
+          if (results.refreshed > 0) {
+            console.log(`aiFiverr KB: Auto-refresh completed: ${results.refreshed} files refreshed`);
+          }
+          if (results.failed > 0) {
+            console.warn(`aiFiverr KB: Auto-refresh had ${results.failed} failures`);
+          }
+        }).catch(error => {
+          console.error('aiFiverr KB: Auto-refresh failed:', error);
+        });
+      }
+    } catch (error) {
+      console.error('aiFiverr KB: Error in auto-refresh:', error);
+    }
   }
 
   /**

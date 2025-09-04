@@ -829,14 +829,21 @@ class StreamingChatbox {
         if (window.apiKeyManager && window.apiKeyManager.initialized) {
           // FIXED: Try 'gemini' session first (same as initial request) for file access consistency
           let keyData = window.apiKeyManager.getKeyForSession('gemini');
-          if (keyData) {
+          if (keyData && keyData.key) {
             apiKey = keyData.key;
             console.log('aiFiverr StreamingChatbox: Using gemini session API key for file validation (consistency with initial request)');
           } else {
-            // Fallback to streaming_chat session
+            // Fallback to streaming_chat session (should have inherited key from gemini session)
             keyData = window.apiKeyManager.getKeyForSession('streaming_chat');
-            apiKey = keyData ? keyData.key : null;
-            console.log('aiFiverr StreamingChatbox: Using streaming_chat session API key for file validation (fallback)');
+            if (keyData && keyData.key) {
+              apiKey = keyData.key;
+              console.log('aiFiverr StreamingChatbox: Using streaming_chat session API key for file validation (inherited from gemini)');
+            } else {
+              console.warn('aiFiverr StreamingChatbox: No session keys available, trying to get any healthy key');
+              // Last resort: get any available healthy key
+              const healthyKeyData = window.apiKeyManager.getNextHealthyKey();
+              apiKey = healthyKeyData ? healthyKeyData.key : null;
+            }
           }
         }
 
@@ -1399,25 +1406,35 @@ class StreamingChatbox {
    * Stream response with full conversation context
    */
   async streamWithFullContext() {
-    // NEW: Enhanced API key handling with rotation support
+    // CRITICAL FIX: Enhanced API key handling with session consistency for file access
     let apiKey;
     let sessionId = 'streaming_chat'; // Consistent session ID for this chat
 
     try {
       if (window.apiKeyManager && window.apiKeyManager.initialized) {
-        // Try to get the same key used for this session to maintain consistency
+        // FIXED: Try to get the same key used for this session to maintain file access consistency
         const keyData = window.apiKeyManager.getKeyForSession(sessionId);
         apiKey = keyData ? keyData.key : null;
         console.log('aiFiverr StreamingChatbox: API key from apiKeyManager for session:', apiKey ? 'Found' : 'Not found');
 
-        // If no key for this session, get any available key but mark the session
+        // If no key for this session, try to inherit from gemini session first
         if (!apiKey) {
-          const newKeyData = window.apiKeyManager.getNextKey();
-          if (newKeyData) {
-            apiKey = newKeyData.key;
-            // Associate this key with our session to maintain consistency
-            window.apiKeyManager.setSessionKey(sessionId, newKeyData.key);
-            console.log('aiFiverr StreamingChatbox: Assigned new API key to session');
+          console.log('aiFiverr StreamingChatbox: No streaming_chat session key, trying to inherit from gemini session');
+          const geminiKeyData = window.apiKeyManager.getKeyForSession('gemini');
+          if (geminiKeyData && geminiKeyData.key) {
+            apiKey = geminiKeyData.key;
+            // Set this key for the streaming session to maintain consistency
+            window.apiKeyManager.setSessionKey(sessionId, geminiKeyData.key);
+            console.log('aiFiverr StreamingChatbox: Inherited API key from gemini session for file access consistency');
+          } else {
+            // Last resort: get any available healthy key
+            const newKeyData = window.apiKeyManager.getNextHealthyKey();
+            if (newKeyData) {
+              apiKey = newKeyData.key;
+              // Associate this key with our session to maintain consistency
+              window.apiKeyManager.setSessionKey(sessionId, newKeyData.key);
+              console.log('aiFiverr StreamingChatbox: Assigned new healthy API key to session');
+            }
           }
         }
       }
