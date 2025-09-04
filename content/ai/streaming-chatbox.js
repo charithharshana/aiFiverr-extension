@@ -904,6 +904,20 @@ class StreamingChatbox {
           this.suspiciousFileIds.add(fileId);
         }
 
+        // IMPROVED: Check for empty file content issues
+        if (response.status === 200) {
+          try {
+            const fileData = await response.json();
+            if (!fileData.sizeBytes || fileData.sizeBytes === 0) {
+              errorMessage = 'File appears to be empty - content may not have been uploaded correctly';
+            } else if (fileData.state !== 'ACTIVE') {
+              errorMessage = `File is not ready (state: ${fileData.state}) - may still be processing`;
+            }
+          } catch (parseError) {
+            // If we can't parse the response, stick with the original error
+          }
+        }
+
         return {
           isValid: false,
           error: errorMessage

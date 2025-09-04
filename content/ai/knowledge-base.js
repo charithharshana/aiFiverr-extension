@@ -1720,8 +1720,20 @@ class KnowledgeBaseManager {
         console.log('aiFiverr KB: File uploaded to Gemini successfully:', {
           name: response.data.displayName,
           uri: response.data.uri,
-          state: response.data.state
+          state: response.data.state,
+          sizeBytes: response.data.sizeBytes
         });
+
+        // IMPROVED: Validate file content after upload to ensure it's accessible
+        if (response.data.uri && response.data.state === 'ACTIVE') {
+          console.log('aiFiverr KB: Validating uploaded file content...');
+
+          // Note: File validation would require API key, which we'll handle in the streaming chatbox
+          // For now, we'll log a warning if the file size is 0
+          if (!response.data.sizeBytes || response.data.sizeBytes === 0) {
+            console.warn('⚠️ aiFiverr KB: Warning - File uploaded with 0 bytes, content may be missing');
+          }
+        }
 
         // Update file data with Gemini information for fast access
         const file = this.files.get(fileData.driveFileId);
@@ -1732,6 +1744,7 @@ class KnowledgeBaseManager {
           file.geminiUploadTime = Date.now();
           file.geminiExpirationTime = response.data.expirationTime;
           file.isGeminiReady = response.data.state === 'ACTIVE';
+          file.geminiSizeBytes = response.data.sizeBytes; // Track file size for validation
 
           // Save updated file data for persistence
           await this.saveFiles();
@@ -2948,18 +2961,49 @@ class KnowledgeBaseManager {
   }
 
   /**
-   * Fetch file content from Google Drive
+   * Fetch file content from Google Drive using proper API
    */
   async fetchDriveFileContent(fileRef) {
     try {
-      const response = await fetch(fileRef.webViewLink);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      console.log('aiFiverr KB: Fetching file content for:', fileRef.name);
+
+      // CRITICAL FIX: Use proper Google Drive API to download file content instead of webViewLink
+      // webViewLink returns HTML viewer page, not actual file content
+
+      if (!fileRef.driveFileId && !fileRef.id) {
+        throw new Error('No Drive file ID available');
       }
-      return await response.text();
+
+      const fileId = fileRef.driveFileId || fileRef.id;
+
+      // Use the background script to download the file content properly
+      const response = await this.sendMessageWithRetry({
+        type: 'DOWNLOAD_FILE_FROM_DRIVE',
+        fileId: fileId
+      }, 3);
+
+      if (!response.success) {
+        throw new Error(`Failed to download file: ${response.error}`);
+      }
+
+      // Decode the base64 content to get the actual file content
+      if (response.data) {
+        try {
+          // The response.data is base64 encoded, decode it to get actual content
+          const decodedContent = atob(response.data);
+          console.log('aiFiverr KB: Successfully decoded file content, length:', decodedContent.length);
+          return decodedContent;
+        } catch (decodeError) {
+          console.error('aiFiverr KB: Failed to decode file content:', decodeError);
+          throw new Error(`Failed to decode file content: ${decodeError.message}`);
+        }
+      } else {
+        throw new Error('No file content received');
+      }
+
     } catch (error) {
-      console.error('Failed to fetch Drive file content:', error);
-      return `[Unable to load content from: ${fileRef.name}]`;
+      console.error('aiFiverr KB: Failed to fetch Drive file content:', error);
+      return `[Unable to load content from: ${fileRef.name}] - ${error.message}`;
     }
   }
 
