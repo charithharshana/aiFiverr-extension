@@ -668,6 +668,8 @@ class PopupManager {
         document.getElementById('autoSave').checked = settings.autoSave !== false;
         document.getElementById('notifications').checked = settings.notifications !== false;
         document.getElementById('maxContextLength').value = settings.maxContextLength || 1048576;
+        document.getElementById('googleSearchGrounding').checked = settings.googleSearchGrounding === true;
+        document.getElementById('urlContextExtraction').checked = settings.urlContextExtraction === true;
       }
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -1869,6 +1871,8 @@ class PopupManager {
       const notificationsEl = document.getElementById('notifications');
       const keyRotationEl = document.getElementById('keyRotation');
       const maxContextLengthEl = document.getElementById('maxContextLength');
+      const googleSearchGroundingEl = document.getElementById('googleSearchGrounding');
+      const urlContextExtractionEl = document.getElementById('urlContextExtraction');
 
       // Only update settings if elements exist
       if (defaultModelEl) {
@@ -1880,6 +1884,8 @@ class PopupManager {
       if (notificationsEl) settings.notifications = notificationsEl.checked;
       if (keyRotationEl) settings.keyRotation = keyRotationEl.checked;
       if (maxContextLengthEl) settings.maxContextLength = parseInt(maxContextLengthEl.value) || 1048576;
+      if (googleSearchGroundingEl) settings.googleSearchGrounding = googleSearchGroundingEl.checked;
+      if (urlContextExtractionEl) settings.urlContextExtraction = urlContextExtractionEl.checked;
 
       console.log('Saving preferences:', settings);
 

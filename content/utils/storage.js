@@ -332,6 +332,9 @@ class StorageManager {
       conversationContext: true,
       maxContextLength: 1048576, // 1,048,576 tokens - Gemini 2.5 maximum input tokens
       restrictToFiverr: true, // New setting: true = Fiverr only, false = all sites
+      // Google Search grounding and URL context settings
+      googleSearchGrounding: false, // Default: disabled
+      urlContextExtraction: false, // Default: disabled
       keyboardShortcuts: {
         aiAssistant: {
           ctrl: true,

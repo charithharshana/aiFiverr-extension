@@ -161,6 +161,25 @@ class GeminiClient {
         }
       };
 
+      // Add grounding tools if enabled in options
+      if (options.enableGrounding) {
+        payload.tools = [];
+
+        if (options.googleSearchGrounding) {
+          payload.tools.push({ googleSearch: {} });
+          console.log('aiFiverr Gemini: Added Google Search grounding tool');
+        }
+
+        if (options.urlContextExtraction) {
+          payload.tools.push({ urlContext: {} });
+          console.log('aiFiverr Gemini: Added URL context extraction tool');
+        }
+
+        if (payload.tools.length > 0) {
+          console.log('aiFiverr Gemini: Using grounding tools:', payload.tools.map(t => Object.keys(t)[0]));
+        }
+      }
+
       // Log payload summary for debugging
       console.log('aiFiverr Gemini: Sending request to API with', payload.contents.length, 'content parts');
 
@@ -229,9 +248,29 @@ class GeminiClient {
       }
 
       const text = result.candidates[0].content.parts[0].text;
+
+      // Extract grounding metadata if available
+      const groundingMetadata = result.candidates[0].groundingMetadata;
+      const urlContextMetadata = result.candidates[0].urlContextMetadata;
+
+      let enhancedText = text;
+
+      // Add citations if grounding metadata is available
+      if (groundingMetadata && groundingMetadata.groundingSupports) {
+        console.log('aiFiverr Gemini: Response includes grounding metadata with', groundingMetadata.groundingSupports.length, 'supports');
+        enhancedText = this.addCitations(text, groundingMetadata);
+      }
+
+      // Log URL context metadata if available
+      if (urlContextMetadata) {
+        console.log('aiFiverr Gemini: Response includes URL context metadata:', urlContextMetadata);
+      }
+
       return {
-        text: text,
-        response: text // For compatibility
+        text: enhancedText,
+        response: enhancedText, // For compatibility
+        groundingMetadata,
+        urlContextMetadata
       };
 
     } catch (error) {
@@ -359,6 +398,25 @@ class GeminiClient {
         }
       };
 
+      // Add grounding tools if enabled in options
+      if (options.enableGrounding) {
+        payload.tools = [];
+
+        if (options.googleSearchGrounding) {
+          payload.tools.push({ googleSearch: {} });
+          console.log('aiFiverr Gemini Chat: Added Google Search grounding tool');
+        }
+
+        if (options.urlContextExtraction) {
+          payload.tools.push({ urlContext: {} });
+          console.log('aiFiverr Gemini Chat: Added URL context extraction tool');
+        }
+
+        if (payload.tools.length > 0) {
+          console.log('aiFiverr Gemini Chat: Using grounding tools:', payload.tools.map(t => Object.keys(t)[0]));
+        }
+      }
+
       // COMPREHENSIVE PAYLOAD DEBUGGING - Log the entire payload being sent
       console.log('🚨 STREAMING PAYLOAD DEBUG: Full payload being sent to Gemini API:', JSON.stringify(payload, null, 2));
 
@@ -413,20 +471,87 @@ class GeminiClient {
 
       const responseText = result.candidates[0].content.parts[0].text;
 
+      // Extract grounding metadata if available
+      const groundingMetadata = result.candidates[0].groundingMetadata;
+      const urlContextMetadata = result.candidates[0].urlContextMetadata;
+
+      let enhancedResponse = responseText;
+
+      // Add citations if grounding metadata is available
+      if (groundingMetadata && groundingMetadata.groundingSupports) {
+        console.log('aiFiverr Gemini: Response includes grounding metadata with', groundingMetadata.groundingSupports.length, 'supports');
+        enhancedResponse = this.addCitations(responseText, groundingMetadata);
+      }
+
+      // Log URL context metadata if available
+      if (urlContextMetadata) {
+        console.log('aiFiverr Gemini: Response includes URL context metadata:', urlContextMetadata);
+      }
+
       // Add to session if provided
       if (session && session.addMessage) {
         session.addMessage('user', message);
-        session.addMessage('assistant', responseText);
+        session.addMessage('assistant', enhancedResponse);
       }
 
       return {
-        response: responseText,
-        text: responseText // For compatibility
+        response: enhancedResponse,
+        text: enhancedResponse, // For compatibility
+        groundingMetadata,
+        urlContextMetadata
       };
 
     } catch (error) {
       console.error('aiFiverr Gemini: Generate chat reply failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Add citations to response text based on grounding metadata
+   */
+  addCitations(responseText, groundingMetadata) {
+    try {
+      let text = responseText;
+      const supports = groundingMetadata.groundingSupports;
+      const chunks = groundingMetadata.groundingChunks;
+
+      if (!supports || !chunks) {
+        return text;
+      }
+
+      // Sort supports by end_index in descending order to avoid shifting issues when inserting
+      const sortedSupports = [...supports].sort(
+        (a, b) => (b.segment?.endIndex ?? 0) - (a.segment?.endIndex ?? 0)
+      );
+
+      for (const support of sortedSupports) {
+        const endIndex = support.segment?.endIndex;
+        if (endIndex === undefined || !support.groundingChunkIndices?.length) {
+          continue;
+        }
+
+        const citationLinks = support.groundingChunkIndices
+          .map(i => {
+            const chunk = chunks[i];
+            if (chunk?.web?.uri) {
+              return `[${i + 1}](${chunk.web.uri})`;
+            }
+            return null;
+          })
+          .filter(Boolean);
+
+        if (citationLinks.length > 0) {
+          const citationString = ` ${citationLinks.join(', ')}`;
+          text = text.slice(0, endIndex) + citationString + text.slice(endIndex);
+        }
+      }
+
+      console.log('aiFiverr Gemini: Added citations to response');
+      return text;
+    } catch (error) {
+      console.error('aiFiverr Gemini: Error adding citations:', error);
+      return responseText; // Return original text if citation processing fails
     }
   }
 

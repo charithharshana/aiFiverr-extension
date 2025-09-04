@@ -1141,7 +1141,7 @@ class TextSelector {
       this.contextMenu.innerHTML = '';
 
       // Add text area for {reply} variable at the top
-      const replySection = this.createReplySection();
+      const replySection = await this.createReplySection();
       this.contextMenu.appendChild(replySection);
 
       // Add separator
@@ -1181,7 +1181,7 @@ class TextSelector {
   /**
    * Create reply section with text area for {reply} variable
    */
-  createReplySection() {
+  async createReplySection() {
     const section = document.createElement('div');
     section.style.cssText = 'padding: 12px 16px; background: #f8f9fa;';
 
@@ -1193,7 +1193,7 @@ class TextSelector {
     leftSection.style.cssText = 'display: flex; align-items: center; justify-content: flex-start;';
 
     const mainSpan = document.createElement('span');
-    mainSpan.textContent = 'Reply Text ({reply} variable)';
+    mainSpan.textContent = 'Reply ({reply})';
 
     const optionalSpan = document.createElement('span');
     optionalSpan.textContent = 'Optional';
@@ -1205,6 +1205,9 @@ class TextSelector {
     // FEATURE 3: Session management - New Session button
     const rightSection = document.createElement('div');
     rightSection.style.cssText = 'display: flex; align-items: center; gap: 4px; margin-left: 8px;';
+
+    // Add grounding controls before the reset button
+    await this.addGroundingControls(rightSection);
 
     const newSessionBtn = document.createElement('button');
     newSessionBtn.innerHTML = '🔄';
@@ -1312,6 +1315,126 @@ class TextSelector {
     section.appendChild(textarea);
 
     return section;
+  }
+
+  /**
+   * Add grounding controls to the right section
+   */
+  async addGroundingControls(rightSection) {
+    try {
+      // Get current settings for default values
+      const settings = await this.getSettings();
+
+      // Create Google Search grounding toggle
+      const searchToggle = this.createToggleControl(
+        '🔍',
+        'Google Search grounding',
+        settings.googleSearchGrounding || false,
+        (checked) => {
+          this.googleSearchGrounding = checked;
+          console.log('aiFiverr: Google Search grounding toggled:', checked);
+        }
+      );
+
+      // Create URL context extraction toggle
+      const urlToggle = this.createToggleControl(
+        '🔗',
+        'URL context extraction',
+        settings.urlContextExtraction || false,
+        (checked) => {
+          this.urlContextExtraction = checked;
+          console.log('aiFiverr: URL context extraction toggled:', checked);
+        }
+      );
+
+      // Initialize instance variables with settings defaults
+      this.googleSearchGrounding = settings.googleSearchGrounding || false;
+      this.urlContextExtraction = settings.urlContextExtraction || false;
+
+      rightSection.appendChild(searchToggle);
+      rightSection.appendChild(urlToggle);
+
+    } catch (error) {
+      console.error('aiFiverr: Error adding grounding controls:', error);
+    }
+  }
+
+  /**
+   * Create a small toggle control
+   */
+  createToggleControl(icon, title, defaultChecked, onChange) {
+    const toggle = document.createElement('button');
+    toggle.innerHTML = icon;
+    toggle.title = title;
+    toggle.style.cssText = `
+      background: ${defaultChecked ? '#e8f5e8' : '#f8f9fa'};
+      border: 1px solid ${defaultChecked ? '#4caf50' : '#dee2e6'};
+      border-radius: 6px;
+      padding: 4px 6px;
+      font-size: 12px;
+      color: ${defaultChecked ? '#2e7d32' : '#495057'};
+      cursor: pointer;
+      transition: all 0.2s ease;
+      min-width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      margin: 0;
+      outline: none;
+    `;
+
+    let isChecked = defaultChecked;
+
+    const updateToggleStyle = () => {
+      toggle.style.background = isChecked ? '#e8f5e8' : '#f8f9fa';
+      toggle.style.borderColor = isChecked ? '#4caf50' : '#dee2e6';
+      toggle.style.color = isChecked ? '#2e7d32' : '#495057';
+    };
+
+    toggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      isChecked = !isChecked;
+      updateToggleStyle();
+      onChange(isChecked);
+    });
+
+    toggle.addEventListener('mouseenter', () => {
+      toggle.style.transform = 'translateY(-1px)';
+      toggle.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
+    });
+
+    toggle.addEventListener('mouseleave', () => {
+      toggle.style.transform = 'translateY(0)';
+      toggle.style.boxShadow = '0 1px 2px rgba(0, 0, 0, 0.05)';
+    });
+
+    // Prevent dropdown from closing when interacting with toggle
+    toggle.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.isInteractingWithUI = true;
+    });
+
+    return toggle;
+  }
+
+  /**
+   * Get settings from storage
+   */
+  async getSettings() {
+    try {
+      if (window.storageManager) {
+        return await window.storageManager.getSettings();
+      }
+      // Fallback to direct storage access
+      const result = await chrome.storage.local.get('settings');
+      return result.settings || {};
+    } catch (error) {
+      console.error('aiFiverr: Error getting settings:', error);
+      return {};
+    }
   }
 
   /**
@@ -1778,7 +1901,21 @@ class TextSelector {
 
       let response;
       try {
-        response = await window.geminiClient.generateChatReply(session, finalPrompt, { knowledgeBaseFiles });
+        // Prepare grounding options
+        const groundingOptions = {
+          knowledgeBaseFiles,
+          enableGrounding: this.googleSearchGrounding || this.urlContextExtraction,
+          googleSearchGrounding: this.googleSearchGrounding || false,
+          urlContextExtraction: this.urlContextExtraction || false
+        };
+
+        console.log('aiFiverr: Using grounding options:', {
+          enableGrounding: groundingOptions.enableGrounding,
+          googleSearchGrounding: groundingOptions.googleSearchGrounding,
+          urlContextExtraction: groundingOptions.urlContextExtraction
+        });
+
+        response = await window.geminiClient.generateChatReply(session, finalPrompt, groundingOptions);
 
         if (!response || !response.response) {
           throw new Error('Empty response from AI service');

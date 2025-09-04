@@ -1759,12 +1759,6 @@ class KnowledgeBaseManager {
    * Send message to background script with retry mechanism
    */
   async sendMessageWithRetry(message, maxRetries = 3, delay = 1000) {
-    // Check if we should operate normally (Facebook error handling)
-    if (window.facebookErrorHandler && !window.facebookErrorHandler.shouldOperateNormally()) {
-      console.warn('aiFiverr KB: Extension disabled due to errors, skipping message');
-      throw new Error('Extension temporarily disabled due to errors');
-    }
-
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`aiFiverr KB: Sending message (attempt ${attempt}/${maxRetries}):`, message.type);
@@ -1799,20 +1793,6 @@ class KnowledgeBaseManager {
 
       } catch (error) {
         console.error(`aiFiverr KB: Message attempt ${attempt} failed:`, error.message);
-
-        // Handle Facebook-specific errors
-        if (window.facebookErrorHandler) {
-          if (error.message.includes('CSP') || error.message.includes('Content Security Policy')) {
-            console.warn('aiFiverr KB: CSP violation detected, switching to safe mode');
-            window.aiFiverrUseCSPSafeMode = true;
-          }
-
-          if (error.message.includes('Extension context invalidated')) {
-            console.warn('aiFiverr KB: Extension context invalidated on Facebook');
-            window.facebookErrorHandler.disableExtensionFeatures();
-            throw error;
-          }
-        }
 
         if (attempt === maxRetries) {
           throw new Error(`Failed to communicate with background script after ${maxRetries} attempts: ${error.message}`);
