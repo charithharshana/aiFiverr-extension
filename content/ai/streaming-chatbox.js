@@ -32,9 +32,11 @@ class StreamingChatbox {
     this.manuallyAttachedFiles = []; // Stores manually attached files
 
     // NEW: File access validation and error handling
+    // FIXED: Remove hardcoded file blacklist since API key consistency fix resolves access issues
+    // Only keep truly problematic files that are confirmed to be permanently inaccessible
     this.suspiciousFileIds = new Set([
-      'wrpdb7uq3ddk',  // Original problematic file
-      '46vm361k1btt'   // portfolio.md file causing 403 permission errors
+      'wrpdb7uq3ddk'   // Keep only the original problematic file
+      // Removed '46vm361k1btt' (portfolio.md) - should be accessible with API key consistency fix
     ]);
     this.validatedFiles = new Map(); // Cache for file validation results
     this.fileValidationPromises = new Map(); // Prevent duplicate validation requests
@@ -875,6 +877,12 @@ class StreamingChatbox {
       });
 
       if (response.ok) {
+        // IMPROVED: If file is now accessible, remove it from suspicious list
+        const fileId = file.geminiUri.split('/').pop();
+        if (this.suspiciousFileIds.has(fileId)) {
+          this.removeFromSuspiciousList(fileId);
+        }
+
         return {
           isValid: true,
           error: null
@@ -994,9 +1002,10 @@ class StreamingChatbox {
     // Clear file validation cache and reset suspicious files to defaults
     this.validatedFiles.clear();
     this.fileValidationPromises.clear();
+    // FIXED: Remove hardcoded portfolio.md blacklist - API key consistency fix should resolve access
     this.suspiciousFileIds = new Set([
-      'wrpdb7uq3ddk',  // Original problematic file
-      '46vm361k1btt'   // portfolio.md file causing 403 permission errors
+      'wrpdb7uq3ddk'   // Keep only the original problematic file
+      // Removed '46vm361k1btt' (portfolio.md) - should be accessible with API key consistency fix
     ]);
 
     // Reset transition state
@@ -1018,11 +1027,10 @@ class StreamingChatbox {
     this.validatedFiles.clear();
     this.fileValidationPromises.clear();
 
-    // Reset suspicious files to minimal set (keep known problematic ones)
-    this.suspiciousFileIds = new Set([
-      'wrpdb7uq3ddk',  // Original problematic file
-      '46vm361k1btt'   // portfolio.md file causing 403 permission errors
-    ]);
+    // IMPROVED: Clear suspicious files list entirely to allow re-testing
+    // With API key consistency fix, previously problematic files should now work
+    this.suspiciousFileIds.clear();
+    console.log('aiFiverr StreamingChatbox: Cleared suspicious files list - all files will be re-tested');
 
     // Show success message
     this.updateStatus('File access refreshed - you can now retry with previously inaccessible files', 'success');
@@ -1037,6 +1045,19 @@ class StreamingChatbox {
    */
   isFileSuspicious(fileId) {
     return this.suspiciousFileIds.has(fileId);
+  }
+
+  /**
+   * Remove a file from the suspicious list (when it becomes accessible again)
+   * @param {string} fileId - The file ID to remove from suspicious list
+   */
+  removeFromSuspiciousList(fileId) {
+    if (this.suspiciousFileIds.has(fileId)) {
+      this.suspiciousFileIds.delete(fileId);
+      console.log(`aiFiverr StreamingChatbox: Removed ${fileId} from suspicious files list - now accessible`);
+      return true;
+    }
+    return false;
   }
 
   /**
