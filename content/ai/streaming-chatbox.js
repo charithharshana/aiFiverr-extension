@@ -1195,6 +1195,23 @@ class StreamingChatbox {
     // NEW: Get files based on variable processor logic (manually attached + referenced files)
     let knowledgeBaseFiles = [];
 
+    // CRITICAL FIX: Track all file IDs that will be in the final payload to prevent duplicates
+    const allPayloadFileIds = new Set();
+
+    // First, collect all file IDs that are already in conversation history
+    for (const message of contents) {
+      if (message.parts) {
+        message.parts.forEach(part => {
+          if (part.fileData && part.fileData.fileUri) {
+            const fileId = part.fileData.fileUri.split('/').pop();
+            allPayloadFileIds.add(fileId);
+          }
+        });
+      }
+    }
+
+    console.log('🔍 STREAMING CHATBOX: Files already in conversation history:', Array.from(allPayloadFileIds));
+
     // Show current blacklist status
     console.log('🔍 STREAMING CHATBOX: Blacklist system status:');
     console.log('  - blacklistedFileIds exists:', !!this.blacklistedFileIds);
@@ -1214,14 +1231,25 @@ class StreamingChatbox {
         this.manuallyAttachedFiles.map(f => ({ name: f.name, fileId: f.geminiUri?.split('/').pop() }))
       );
 
-      // Filter out blacklisted files before adding
+      // Filter out blacklisted files and duplicates before adding
       const validManualFiles = this.manuallyAttachedFiles.filter(file => {
         if (file.geminiUri) {
           const fileId = file.geminiUri.split('/').pop();
+
+          // Check blacklist
           if (this.blacklistedFileIds && this.blacklistedFileIds.has(fileId)) {
             console.warn('🚫 STREAMING CHATBOX: Skipping blacklisted manually attached file:', file.name, fileId);
             return false;
           }
+
+          // CRITICAL FIX: Check for duplicates against conversation history
+          if (allPayloadFileIds.has(fileId)) {
+            console.warn('🚫 STREAMING CHATBOX: Skipping duplicate manually attached file (already in conversation):', file.name, fileId);
+            return false;
+          }
+
+          // Add to tracking set
+          allPayloadFileIds.add(fileId);
         }
         return true;
       });
@@ -1256,20 +1284,22 @@ class StreamingChatbox {
             skippedBlacklisted++;
             continue;
           }
+
+          // CRITICAL FIX: Check for duplicates against all payload files
+          if (allPayloadFileIds.has(fileId)) {
+            console.warn('🚫 STREAMING CHATBOX: Skipping duplicate current message file (already in payload):', file.name, fileId);
+            skippedDuplicates++;
+            continue;
+          }
+
+          // Add to tracking set
+          allPayloadFileIds.add(fileId);
         }
 
-        // Check for duplicates
-        const alreadyIncluded = knowledgeBaseFiles.some(existing =>
-          existing.geminiUri === file.geminiUri || existing.name === file.name
-        );
-        if (!alreadyIncluded) {
-          knowledgeBaseFiles.push(file);
-          console.log('✅ STREAMING CHATBOX: Added current message file:', file.name, file.geminiUri?.split('/').pop());
-          addedFromCurrentMessage++;
-        } else {
-          console.log('⚠️ STREAMING CHATBOX: Skipped duplicate file:', file.name);
-          skippedDuplicates++;
-        }
+        // File passed all checks, add it
+        knowledgeBaseFiles.push(file);
+        console.log('✅ STREAMING CHATBOX: Added current message file:', file.name, file.geminiUri?.split('/').pop());
+        addedFromCurrentMessage++;
       }
 
       console.log(`🚨 STREAMING CHATBOX: Current message files summary: ${addedFromCurrentMessage} added, ${skippedBlacklisted} blacklisted, ${skippedDuplicates} duplicates`);
@@ -1426,7 +1456,7 @@ class StreamingChatbox {
         console.log('✅ STREAMING CHATBOX: No blacklisted files in payload');
       }
     } else {
-      console.log('🔍 STREAMING CHATBOX: No blacklist active');
+      console.log('🔍 STREAMING CHATBOX: Blacklist is empty (no files have been blacklisted yet)');
     }
 
     // Get model name
@@ -1477,14 +1507,39 @@ class StreamingChatbox {
 
         // Try to remove just this specific file and continue
         console.log('🧹 STREAMING CHATBOX: Removing problematic file and retrying:', fileId);
-        const removalSuccess = await this.removeSpecificFileFromCurrentRequest(fileId);
 
-        // Debug blacklist after removal
-        console.log('🔍 STREAMING CHATBOX: Blacklist after file removal:');
-        console.log('  - removal success:', removalSuccess);
-        console.log('  - blacklistedFileIds size:', this.blacklistedFileIds ? this.blacklistedFileIds.size : 'N/A');
-        console.log('  - current blacklist:', this.blacklistedFileIds ? Array.from(this.blacklistedFileIds) : 'N/A');
-        console.log('  - file in blacklist:', this.blacklistedFileIds ? this.blacklistedFileIds.has(fileId) : 'N/A');
+        try {
+          const removalSuccess = await this.removeSpecificFileFromCurrentRequest(fileId);
+
+          // Debug blacklist after removal
+          console.log('🔍 STREAMING CHATBOX: Blacklist after file removal:');
+          console.log('  - removal success:', removalSuccess);
+          console.log('  - blacklistedFileIds size:', this.blacklistedFileIds ? this.blacklistedFileIds.size : 'N/A');
+          console.log('  - current blacklist:', this.blacklistedFileIds ? Array.from(this.blacklistedFileIds) : 'N/A');
+          console.log('  - file in blacklist:', this.blacklistedFileIds ? this.blacklistedFileIds.has(fileId) : 'N/A');
+
+          if (!removalSuccess) {
+            console.warn('⚠️ STREAMING CHATBOX: File removal reported no success, but continuing with retry');
+          }
+
+          // Ensure file is definitely in blacklist
+          if (!this.blacklistedFileIds || !this.blacklistedFileIds.has(fileId)) {
+            console.warn('⚠️ STREAMING CHATBOX: File not in blacklist after removal, adding manually');
+            if (!this.blacklistedFileIds) {
+              this.blacklistedFileIds = new Set();
+            }
+            this.blacklistedFileIds.add(fileId);
+          }
+
+        } catch (removalError) {
+          console.error('❌ STREAMING CHATBOX: Error during file removal:', removalError);
+          // Still try to blacklist the file
+          if (!this.blacklistedFileIds) {
+            this.blacklistedFileIds = new Set();
+          }
+          this.blacklistedFileIds.add(fileId);
+          console.log('🚫 STREAMING CHATBOX: Added file to blacklist despite removal error:', fileId);
+        }
 
         if (retryCount < 3) {
           console.log(`🔄 STREAMING CHATBOX: Retrying without problematic file (attempt ${retryCount + 1}/3)...`);
