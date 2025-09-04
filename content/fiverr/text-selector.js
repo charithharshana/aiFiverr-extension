@@ -1620,15 +1620,46 @@ class TextSelector {
         promptType: prompt.isDefault ? 'default' : 'custom'
       });
 
-      // Check if required managers are available
+      // Check if required managers are available with graceful degradation
       if (!window.sessionManager) {
-        throw new Error('Session manager not available');
+        console.warn('aiFiverr: Session manager not available, attempting to initialize...');
+        if (typeof window.initializeSessionManager === 'function') {
+          await window.initializeSessionManager();
+        }
+        if (!window.sessionManager) {
+          throw new Error('Session manager not available and could not be initialized');
+        }
       }
+
+      // CRITICAL FIX: Handle knowledge base manager initialization gracefully
       if (!window.knowledgeBaseManager) {
-        throw new Error('Knowledge base manager not available');
+        console.warn('aiFiverr: Knowledge base manager not available, attempting to initialize...');
+        if (typeof window.initializeKnowledgeBaseManager === 'function') {
+          await window.initializeKnowledgeBaseManager();
+        }
+
+        // If still not available, continue with degraded functionality
+        if (!window.knowledgeBaseManager) {
+          console.warn('aiFiverr: Knowledge base manager not available - continuing with limited functionality');
+        }
+      } else if (window.knowledgeBaseManager && !window.knowledgeBaseManager.initialized) {
+        // Manager exists but not initialized - wait for it
+        console.log('aiFiverr: Knowledge base manager exists but not initialized, waiting...');
+        try {
+          await window.knowledgeBaseManager.waitForInitialization(3000); // 3 second timeout
+        } catch (error) {
+          console.warn('aiFiverr: Failed to wait for knowledge base manager initialization:', error);
+        }
       }
+
       if (!window.geminiClient) {
-        throw new Error('Gemini client not available');
+        console.warn('aiFiverr: Gemini client not available, attempting to initialize...');
+        if (typeof window.initializeGeminiClient === 'function') {
+          await window.initializeGeminiClient();
+        }
+        if (!window.geminiClient) {
+          throw new Error('Gemini client not available and could not be initialized');
+        }
       }
 
       // Get or create session for text selection
@@ -1661,11 +1692,18 @@ class TextSelector {
       // Process prompt with enhanced error handling
       let result;
       try {
-        // Get all knowledge base variables to include in context
-        const knowledgeBaseVariables = window.knowledgeBaseManager ?
-          window.knowledgeBaseManager.getAllVariables() : {};
-
-        console.log('aiFiverr: Available knowledge base variables:', Object.keys(knowledgeBaseVariables));
+        // Get all knowledge base variables to include in context (with graceful degradation)
+        let knowledgeBaseVariables = {};
+        if (window.knowledgeBaseManager) {
+          try {
+            knowledgeBaseVariables = window.knowledgeBaseManager.getAllVariables();
+            console.log('aiFiverr: Available knowledge base variables:', Object.keys(knowledgeBaseVariables));
+          } catch (error) {
+            console.warn('aiFiverr: Failed to get knowledge base variables:', error);
+          }
+        } else {
+          console.log('aiFiverr: Knowledge base manager not available - using empty variables');
+        }
 
         // NEW APPROACH: Use variable processor to only include variables referenced in prompt
         const availableContext = {
@@ -1698,17 +1736,23 @@ class TextSelector {
         // CRITICAL FIX: Use knowledge base manager for saved prompts to get attached files
         // The variable processor doesn't know about files attached to saved prompts
         if (window.knowledgeBaseManager && promptKey) {
-          console.log('aiFiverr: Using knowledge base manager for saved prompt processing');
+          try {
+            console.log('aiFiverr: Using knowledge base manager for saved prompt processing');
 
-          // First get the prompt processing result from knowledge base manager
-          // This will include files that were attached to the saved prompt
-          result = await window.knowledgeBaseManager.processPrompt(promptKey, context);
+            // First get the prompt processing result from knowledge base manager
+            // This will include files that were attached to the saved prompt
+            result = await window.knowledgeBaseManager.processPrompt(promptKey, context);
 
-          // Store context for streaming chat consistency
-          this.lastProcessedContext = availableContext;
-          this.lastUsedVariables = Object.keys(context);
-          this.lastKnowledgeBaseFiles = result.knowledgeBaseFiles || [];
-          this.lastUsedPrompt = result.prompt;
+            // Store context for streaming chat consistency
+            this.lastProcessedContext = availableContext;
+            this.lastUsedVariables = Object.keys(context);
+            this.lastKnowledgeBaseFiles = result.knowledgeBaseFiles || [];
+            this.lastUsedPrompt = result.prompt;
+          } catch (error) {
+            console.warn('aiFiverr: Failed to process saved prompt with knowledge base manager:', error);
+            // Fall back to variable processor
+            result = null;
+          }
 
           console.log('aiFiverr: Knowledge base manager processing result:');
           console.log('aiFiverr: Files from saved prompt:', (result.knowledgeBaseFiles || []).length);
@@ -1827,6 +1871,9 @@ class TextSelector {
           // Final fallback: empty array
           knowledgeBaseFiles = [];
         }
+      } else if (knowledgeBaseFiles.length === 0 && !window.knowledgeBaseManager) {
+        console.log('aiFiverr: Knowledge base manager not available - proceeding without knowledge base files');
+        knowledgeBaseFiles = [];
       }
 
       if (knowledgeBaseFiles.length === 0) {

@@ -10,36 +10,56 @@ class KnowledgeBaseManager {
     this.templates = new Map();
     this.files = new Map(); // Store file references
     this.fileCache = new Map(); // Cache file data
+    this.initialized = false;
+    this.initializing = false;
     this.init();
   }
 
   async init() {
-    // First, clean up any existing fake templates
-    await this.cleanupFakeTemplates();
-
-    await this.loadKnowledgeBase();
-    await this.loadCustomPrompts();
-    await this.loadTemplates();
-    await this.loadKnowledgeBaseFiles();
-
-    // CRITICAL FIX: Fix any files with missing timestamps after loading
-    await this.fixFilesWithMissingTimestamps();
-
-    // Only initialize file lifecycle manager and sync if authenticated
-    if (this.isUserAuthenticated()) {
-      // Initialize comprehensive file lifecycle manager
-      await this.initializeFileLifecycleManager();
-
-      // Sync with Gemini Files API in background to avoid blocking initialization
-      this.syncWithGeminiFilesInBackground();
-    } else {
-      if (window.aiFiverrDebug) {
-        console.log('aiFiverr KB: Skipping file operations - user not authenticated');
-      }
+    if (this.initializing || this.initialized) {
+      return;
     }
 
-    // Set up authentication listener to sync when user signs in
-    this.setupAuthListener();
+    this.initializing = true;
+
+    try {
+      console.log('aiFiverr KB: Starting initialization...');
+
+      // First, clean up any existing fake templates
+      await this.cleanupFakeTemplates();
+
+      await this.loadKnowledgeBase();
+      await this.loadCustomPrompts();
+      await this.loadTemplates();
+      await this.loadKnowledgeBaseFiles();
+
+      // CRITICAL FIX: Fix any files with missing timestamps after loading
+      await this.fixFilesWithMissingTimestamps();
+
+      // Only initialize file lifecycle manager and sync if authenticated
+      if (this.isUserAuthenticated()) {
+        // Initialize comprehensive file lifecycle manager
+        await this.initializeFileLifecycleManager();
+
+        // Sync with Gemini Files API in background to avoid blocking initialization
+        this.syncWithGeminiFilesInBackground();
+      } else {
+        if (window.aiFiverrDebug) {
+          console.log('aiFiverr KB: Skipping file operations - user not authenticated');
+        }
+      }
+
+      // Set up authentication listener to sync when user signs in
+      this.setupAuthListener();
+
+      this.initialized = true;
+      console.log('aiFiverr KB: Initialization completed successfully');
+
+    } catch (error) {
+      console.error('aiFiverr KB: Initialization failed:', error);
+    } finally {
+      this.initializing = false;
+    }
   }
 
   /**
@@ -47,6 +67,30 @@ class KnowledgeBaseManager {
    */
   isUserAuthenticated() {
     return window.googleAuthService && window.googleAuthService.isUserAuthenticated();
+  }
+
+  /**
+   * Wait for initialization to complete
+   */
+  async waitForInitialization(maxWaitMs = 5000) {
+    const startTime = Date.now();
+
+    while (!this.initialized && (Date.now() - startTime) < maxWaitMs) {
+      if (!this.initializing) {
+        // If not initializing and not initialized, something went wrong
+        console.warn('aiFiverr KB: Manager not initializing - attempting to restart initialization');
+        this.init();
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    if (!this.initialized) {
+      console.warn('aiFiverr KB: Initialization timeout after', maxWaitMs, 'ms');
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -3076,11 +3120,24 @@ class KnowledgeBaseManager {
 }
 
 // Create global knowledge base manager - but only when explicitly called
-function initializeKnowledgeBaseManager() {
+async function initializeKnowledgeBaseManager() {
   if (!window.knowledgeBaseManager) {
+    console.log('aiFiverr: Creating Knowledge Base Manager...');
     window.knowledgeBaseManager = new KnowledgeBaseManager();
-    console.log('aiFiverr: Knowledge Base Manager created');
   }
+
+  // Wait for initialization to complete
+  try {
+    const initSuccess = await window.knowledgeBaseManager.waitForInitialization();
+    if (initSuccess) {
+      console.log('aiFiverr: Knowledge Base Manager initialized successfully');
+    } else {
+      console.warn('aiFiverr: Knowledge Base Manager initialization timeout - continuing with limited functionality');
+    }
+  } catch (error) {
+    console.error('aiFiverr: Error during Knowledge Base Manager initialization:', error);
+  }
+
   return window.knowledgeBaseManager;
 }
 
