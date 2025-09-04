@@ -1170,6 +1170,13 @@ class StreamingChatbox {
       const cleanParts = message.parts.filter(part => {
         if (part.fileData && part.fileData.fileUri) {
           const fileId = part.fileData.fileUri.split('/').pop();
+
+          // CRITICAL FIX: Check blacklist first
+          if (this.blacklistedFileIds && this.blacklistedFileIds.has(fileId)) {
+            console.log('🚫 STREAMING CHATBOX: Filtering out blacklisted file from conversation history:', fileId);
+            return false;
+          }
+
           // Only skip parts with extremely invalid file IDs
           if (fileId.length < 8) {
             console.log('🚫 STREAMING CHATBOX: Filtering out invalid file from conversation history:', fileId);
@@ -1188,9 +1195,19 @@ class StreamingChatbox {
     // NEW: Get files based on variable processor logic (manually attached + referenced files)
     let knowledgeBaseFiles = [];
 
+    // Show current blacklist status
+    if (this.blacklistedFileIds && this.blacklistedFileIds.size > 0) {
+      console.log('🚫 STREAMING CHATBOX: Current blacklist before file processing:', Array.from(this.blacklistedFileIds));
+    } else {
+      console.log('🔍 STREAMING CHATBOX: No files currently blacklisted');
+    }
+
     // Priority 1: Manually attached files (always include)
     if (this.manuallyAttachedFiles && this.manuallyAttachedFiles.length > 0) {
       console.log('🚨 STREAMING CHATBOX: Processing manually attached files:', this.manuallyAttachedFiles.length);
+      console.log('🚨 STREAMING CHATBOX: Raw manually attached files:',
+        this.manuallyAttachedFiles.map(f => ({ name: f.name, fileId: f.geminiUri?.split('/').pop() }))
+      );
 
       // Filter out blacklisted files before adding
       const validManualFiles = this.manuallyAttachedFiles.filter(file => {
@@ -1206,9 +1223,9 @@ class StreamingChatbox {
 
       knowledgeBaseFiles.push(...validManualFiles);
       console.log('🚨 STREAMING CHATBOX: Including manually attached files:', validManualFiles.length, 'of', this.manuallyAttachedFiles.length);
-      console.log('🚨 STREAMING CHATBOX: Files being included:',
-        validManualFiles.map(f => ({ name: f.name, geminiUri: f.geminiUri, fileId: f.geminiUri?.split('/').pop() }))
-      );
+      if (validManualFiles.length !== this.manuallyAttachedFiles.length) {
+        console.warn('⚠️ STREAMING CHATBOX: Some manually attached files were filtered out by blacklist');
+      }
     } else {
       console.log('🚨 STREAMING CHATBOX: No manually attached files to include');
     }
@@ -1216,6 +1233,13 @@ class StreamingChatbox {
     // Priority 2: Files from current message processing (variable processor determined)
     if (this.currentMessageFiles && this.currentMessageFiles.length > 0) {
       console.log('🚨 STREAMING CHATBOX: Processing current message files:', this.currentMessageFiles.length);
+      console.log('🚨 STREAMING CHATBOX: Raw current message files:',
+        this.currentMessageFiles.map(f => ({ name: f.name, fileId: f.geminiUri?.split('/').pop() }))
+      );
+
+      let addedFromCurrentMessage = 0;
+      let skippedBlacklisted = 0;
+      let skippedDuplicates = 0;
 
       // Avoid duplicates and filter blacklisted files
       for (const file of this.currentMessageFiles) {
@@ -1224,6 +1248,7 @@ class StreamingChatbox {
           const fileId = file.geminiUri.split('/').pop();
           if (this.blacklistedFileIds && this.blacklistedFileIds.has(fileId)) {
             console.warn('🚫 STREAMING CHATBOX: Skipping blacklisted current message file:', file.name, fileId);
+            skippedBlacklisted++;
             continue;
           }
         }
@@ -1235,11 +1260,14 @@ class StreamingChatbox {
         if (!alreadyIncluded) {
           knowledgeBaseFiles.push(file);
           console.log('✅ STREAMING CHATBOX: Added current message file:', file.name, file.geminiUri?.split('/').pop());
+          addedFromCurrentMessage++;
         } else {
           console.log('⚠️ STREAMING CHATBOX: Skipped duplicate file:', file.name);
+          skippedDuplicates++;
         }
       }
-      console.log('aiFiverr StreamingChatbox: Including message-specific files:', this.currentMessageFiles.length);
+
+      console.log(`🚨 STREAMING CHATBOX: Current message files summary: ${addedFromCurrentMessage} added, ${skippedBlacklisted} blacklisted, ${skippedDuplicates} duplicates`);
     }
 
     // REMOVED: No longer automatically include all knowledge base files
@@ -1309,6 +1337,7 @@ class StreamingChatbox {
     console.log('🔍 STREAMING CHATBOX: Debugging payload files...');
     let totalFileCount = 0;
     const allFileIds = [];
+    const fileSourceMap = new Map(); // Track where each file came from
 
     for (let i = 0; i < contents.length; i++) {
       const message = contents[i];
@@ -1319,10 +1348,20 @@ class StreamingChatbox {
           const messageFileIds = fileRefs.map(ref => {
             const fileId = ref.fileData.fileUri.split('/').pop();
             allFileIds.push(fileId);
+
+            // Track source of this file
+            const source = i < this.conversationHistory.length ? 'conversation_history' : 'new_files';
+            if (fileSourceMap.has(fileId)) {
+              fileSourceMap.set(fileId, fileSourceMap.get(fileId) + `, ${source}_msg${i}`);
+            } else {
+              fileSourceMap.set(fileId, `${source}_msg${i}`);
+            }
+
             return {
               fileUri: ref.fileData.fileUri,
               fileId: fileId,
-              mimeType: ref.fileData.mimeType
+              mimeType: ref.fileData.mimeType,
+              source: source
             };
           });
           console.log(`📄 Message ${i} (${message.role}): ${fileRefs.length} file references:`, messageFileIds);
@@ -1333,14 +1372,33 @@ class StreamingChatbox {
     console.log(`🔍 STREAMING CHATBOX: TOTAL FILES IN PAYLOAD: ${totalFileCount}`);
     console.log(`🔍 STREAMING CHATBOX: ALL FILE IDs: [${allFileIds.join(', ')}]`);
 
+    // Show file source mapping
+    console.log('🔍 STREAMING CHATBOX: FILE SOURCE MAPPING:');
+    for (const [fileId, sources] of fileSourceMap.entries()) {
+      console.log(`  📄 ${fileId}: ${sources}`);
+    }
+
+    // Check for duplicates
+    const duplicateFiles = allFileIds.filter((id, index) => allFileIds.indexOf(id) !== index);
+    if (duplicateFiles.length > 0) {
+      console.warn('⚠️ STREAMING CHATBOX: DUPLICATE FILES DETECTED:', [...new Set(duplicateFiles)]);
+    }
+
     // Check if any blacklisted files made it through
     if (this.blacklistedFileIds && this.blacklistedFileIds.size > 0) {
+      console.log(`🔍 STREAMING CHATBOX: Current blacklist: [${Array.from(this.blacklistedFileIds).join(', ')}]`);
       const blacklistedInPayload = allFileIds.filter(id => this.blacklistedFileIds.has(id));
       if (blacklistedInPayload.length > 0) {
         console.error('🚨 STREAMING CHATBOX: BLACKLISTED FILES FOUND IN PAYLOAD:', blacklistedInPayload);
+        // Show exactly where these blacklisted files came from
+        for (const fileId of blacklistedInPayload) {
+          console.error(`🚨   ${fileId} came from: ${fileSourceMap.get(fileId)}`);
+        }
       } else {
         console.log('✅ STREAMING CHATBOX: No blacklisted files in payload');
       }
+    } else {
+      console.log('🔍 STREAMING CHATBOX: No blacklist active');
     }
 
     // Get model name
