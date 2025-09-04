@@ -816,10 +816,104 @@ class StreamingChatbox {
 
       if (removedCount > 0) {
         console.log(`🧹 STREAMING CHATBOX: Removed ${removedCount} references to problematic file ID: ${fileId}`);
+
+        // Find the file name for user notification
+        let fileName = 'unknown file';
+        if (this.manuallyAttachedFiles) {
+          const problematicFile = this.manuallyAttachedFiles.find(file =>
+            file.geminiUri && file.geminiUri.includes(fileId)
+          );
+          if (problematicFile) {
+            fileName = problematicFile.name;
+          }
+        }
+
+        // Notify user about file removal
+        this.addMessage('system', `🔄 File cleanup: Removed inaccessible file "${fileName}" (ID: ${fileId}) from the current conversation. The file appears to have expired or requires refresh.`);
       }
 
     } catch (error) {
       console.error('🚨 STREAMING CHATBOX: Error removing file from session:', error);
+    }
+  }
+
+  /**
+   * Proactively check file accessibility before API requests
+   * @param {Array} files - Files to check
+   * @returns {Array} - Accessible files only
+   */
+  async checkFileAccessibility(files) {
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      return [];
+    }
+
+    const accessibleFiles = [];
+    const inaccessibleFiles = [];
+
+    for (const file of files) {
+      try {
+        if (!file.geminiUri) {
+          inaccessibleFiles.push({ file, reason: 'No Gemini URI' });
+          continue;
+        }
+
+        // Quick accessibility check using HEAD request
+        const fileId = file.geminiUri.split('/').pop();
+        const apiKey = await this.getCurrentApiKey();
+
+        if (!apiKey) {
+          inaccessibleFiles.push({ file, reason: 'No API key available' });
+          continue;
+        }
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/files/${fileId}?key=${apiKey}`, {
+          method: 'HEAD',
+          signal: AbortSignal.timeout(3000)
+        });
+
+        if (response.ok) {
+          accessibleFiles.push(file);
+        } else {
+          inaccessibleFiles.push({ file, reason: `HTTP ${response.status}` });
+        }
+
+      } catch (error) {
+        inaccessibleFiles.push({ file, reason: error.message });
+      }
+    }
+
+    // Notify user about inaccessible files
+    if (inaccessibleFiles.length > 0) {
+      let message = `⚠️ File accessibility check found ${inaccessibleFiles.length} inaccessible file(s):\n`;
+      inaccessibleFiles.forEach(({ file, reason }) => {
+        message += `• ${file.name} - ${reason}\n`;
+      });
+      message += '\nThese files will be excluded from the request. Please refresh or re-upload them if needed.';
+
+      this.addMessage('system', message);
+    }
+
+    return accessibleFiles;
+  }
+
+  /**
+   * Get current API key for file operations
+   */
+  async getCurrentApiKey() {
+    try {
+      if (window.geminiApiManager) {
+        return await window.geminiApiManager.getCurrentApiKey();
+      }
+
+      if (window.apiKeyManager && window.apiKeyManager.initialized) {
+        const keyData = window.apiKeyManager.getKeyForSession('file-check');
+        return keyData ? keyData.key : null;
+      }
+
+      return null;
+    } catch (error) {
+      console.warn('StreamingChatbox: Error getting API key for file check:', error);
+      return null;
     }
   }
 
@@ -1561,8 +1655,22 @@ class StreamingChatbox {
 
       // Handle different types of errors appropriately
       if (isFilePermissionError) {
-        // Provide user-friendly error message for file permission issues
-        throw new Error('Some attached files are no longer accessible. Please refresh your files and try again.');
+        // Provide detailed user-friendly error message for file permission issues
+        const fileIdMatch = errorMessage.match(/File (\w+)/);
+        const fileId = fileIdMatch ? fileIdMatch[1] : 'unknown';
+
+        // Find the file name from our current session
+        let fileName = 'unknown file';
+        if (this.manuallyAttachedFiles) {
+          const problematicFile = this.manuallyAttachedFiles.find(file =>
+            file.geminiUri && file.geminiUri.includes(fileId)
+          );
+          if (problematicFile) {
+            fileName = problematicFile.name;
+          }
+        }
+
+        throw new Error(`File access error: ${fileName} (ID: ${fileId}) is no longer accessible. This usually means the file has expired or was uploaded with a different API key. Please refresh or re-upload the file in your knowledge base and try again.`);
       } else if (response.status === 503) {
         // Handle 503 Service Unavailable - preserve context for retry
         console.log('🔄 STREAMING CHATBOX: 503 Service Unavailable - preserving context for retry');
@@ -2301,15 +2409,7 @@ class StreamingChatbox {
       if (this.manuallyAttachedFiles && this.manuallyAttachedFiles.length > 0) {
         console.log('🔍 STREAMING CHATBOX: Testing file accessibility after potential API key rotation');
 
-        const accessibleFiles = [];
-        for (const file of this.manuallyAttachedFiles) {
-          const isAccessible = await this.testFileAccessibility(file);
-          if (isAccessible) {
-            accessibleFiles.push(file);
-          } else {
-            console.warn('🚨 STREAMING CHATBOX: File no longer accessible after API key rotation:', file.name);
-          }
-        }
+        const accessibleFiles = await this.checkFileAccessibility(this.manuallyAttachedFiles);
 
         if (accessibleFiles.length !== this.manuallyAttachedFiles.length) {
           console.log(`🔄 STREAMING CHATBOX: API key rotation detected - ${this.manuallyAttachedFiles.length - accessibleFiles.length} files no longer accessible`);
