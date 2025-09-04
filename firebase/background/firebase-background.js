@@ -1177,35 +1177,17 @@ async function handleDownloadDriveFile(message, sendResponse) {
       }
     }
 
-    // IMPROVED: Convert response to blob and then to base64 for transfer with better encoding
+    // Convert response to blob and then to base64 for transfer
     const fileBlob = await downloadResponse.blob();
     const arrayBuffer = await fileBlob.arrayBuffer();
     const uint8Array = new Uint8Array(arrayBuffer);
 
-    console.log('⬇️ Firebase Background: File blob size:', fileBlob.size, 'bytes, array buffer size:', arrayBuffer.byteLength);
-
-    // FIXED: Convert to base64 for message passing with improved chunking
+    // Convert to base64 for message passing
     let base64String = '';
-    const chunkSize = 8192; // Increased chunk size for better performance
-
-    try {
-      for (let i = 0; i < uint8Array.length; i += chunkSize) {
-        const chunk = uint8Array.slice(i, i + chunkSize);
-        // Use Array.from to ensure proper conversion and avoid call stack issues
-        const chunkArray = Array.from(chunk);
-        base64String += btoa(String.fromCharCode(...chunkArray));
-      }
-
-      console.log('⬇️ Firebase Background: Base64 encoding completed, length:', base64String.length);
-
-      // DEBUGGING: Verify base64 integrity
-      if (base64String.length > 0) {
-        console.log('⬇️ Firebase Background: Base64 sample (first 100 chars):', base64String.substring(0, 100));
-      }
-
-    } catch (error) {
-      console.error('❌ Firebase Background: Base64 encoding error:', error);
-      throw new Error(`Failed to encode file content: ${error.message}`);
+    const chunkSize = 1024;
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.slice(i, i + chunkSize);
+      base64String += btoa(String.fromCharCode.apply(null, chunk));
     }
 
     console.log('✅ Firebase Background: File downloaded successfully:', fileDetails.name);
@@ -2269,34 +2251,15 @@ async function uploadFileToGemini(file, displayName) {
       throw new Error(`File type '${mimeType}' is not supported by Gemini API. Supported types: text/plain, text/markdown, application/pdf, image/png, image/jpeg, etc.`);
     }
 
-    // CRITICAL FIX: Convert file data to proper format with improved base64 handling
+    // Convert file data to proper format
     let fileContent;
     if (file.data) {
-      try {
-        // Handle base64 data - remove data URL prefix if present
-        const base64Data = file.data.split(',')[1] || file.data;
-        console.log('📤 Firebase Background: Processing base64 data, length:', base64Data.length);
-
-        // FIXED: Use proper base64 decoding that handles chunked encoding correctly
-        const binaryString = atob(base64Data);
-        fileContent = new Uint8Array(binaryString.length);
-
-        // Convert binary string to Uint8Array with proper character code handling
-        for (let i = 0; i < binaryString.length; i++) {
-          fileContent[i] = binaryString.charCodeAt(i) & 0xFF; // Ensure byte values are in 0-255 range
-        }
-
-        console.log('📤 Firebase Background: File content converted successfully, size:', fileContent.length, 'bytes');
-
-        // DEBUGGING: Log first few bytes to verify content integrity
-        if (fileContent.length > 0) {
-          const firstBytes = Array.from(fileContent.slice(0, Math.min(20, fileContent.length)));
-          console.log('📤 Firebase Background: First bytes:', firstBytes);
-        }
-
-      } catch (error) {
-        console.error('❌ Firebase Background: Base64 decoding error:', error);
-        throw new Error(`Failed to decode file content: ${error.message}`);
+      // Handle base64 data
+      const base64Data = file.data.split(',')[1] || file.data;
+      const binaryString = atob(base64Data);
+      fileContent = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        fileContent[i] = binaryString.charCodeAt(i);
       }
     } else {
       throw new Error('Invalid file format - no data property');
@@ -2364,17 +2327,6 @@ async function uploadFileToGemini(file, displayName) {
     console.log('   File name:', result.file.name);
     console.log('   File URI:', result.file.uri);
     console.log('   File state:', result.file.state);
-    console.log('   File size:', result.file.sizeBytes, 'bytes');
-
-    // IMPROVED: Validate that the file was uploaded with content
-    if (!result.file.sizeBytes || result.file.sizeBytes === 0) {
-      console.warn('⚠️ Firebase Background: Warning - File uploaded with 0 bytes, content may be missing');
-    }
-
-    // IMPROVED: Check if file is in ACTIVE state for immediate use
-    if (result.file.state !== 'ACTIVE') {
-      console.log('📤 Firebase Background: File state is', result.file.state, '- may need processing time');
-    }
 
     return {
       success: true,
@@ -2383,80 +2335,12 @@ async function uploadFileToGemini(file, displayName) {
       uri: result.file.uri,
       state: result.file.state,
       sizeBytes: result.file.sizeBytes,
-      createTime: result.file.createTime,
-      // ADDED: Include MIME type for better debugging
-      mimeType: mimeType
+      createTime: result.file.createTime
     };
 
   } catch (error) {
     console.error('❌ Firebase Background: Gemini upload error:', error);
     throw error;
-  }
-}
-
-/**
- * Validate that a Gemini file is accessible and contains content
- * @param {string} fileUri - The Gemini file URI
- * @param {string} apiKey - The API key to use for validation
- * @returns {Promise<Object>} - Validation result
- */
-async function validateGeminiFileContent(fileUri, apiKey) {
-  try {
-    console.log('🔍 Firebase Background: Validating Gemini file content:', fileUri);
-
-    // Extract file ID from URI
-    const fileId = fileUri.split('/').pop();
-
-    // Get file metadata to check if it's accessible and has content
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/files/${fileId}?key=${apiKey}`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return {
-        success: false,
-        error: `File validation failed: ${response.status} - ${errorData.error?.message || response.statusText}`
-      };
-    }
-
-    const fileData = await response.json();
-    console.log('🔍 Firebase Background: File validation result:', {
-      name: fileData.name,
-      state: fileData.state,
-      sizeBytes: fileData.sizeBytes,
-      mimeType: fileData.mimeType
-    });
-
-    // Check if file is in ACTIVE state and has content
-    if (fileData.state !== 'ACTIVE') {
-      return {
-        success: false,
-        error: `File is not active (state: ${fileData.state}). File may still be processing.`
-      };
-    }
-
-    if (!fileData.sizeBytes || fileData.sizeBytes === 0) {
-      return {
-        success: false,
-        error: 'File appears to be empty (0 bytes). Content may not have been uploaded correctly.'
-      };
-    }
-
-    return {
-      success: true,
-      fileData: fileData
-    };
-
-  } catch (error) {
-    console.error('❌ Firebase Background: File validation error:', error);
-    return {
-      success: false,
-      error: `Validation error: ${error.message}`
-    };
   }
 }
 
