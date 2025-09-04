@@ -94,7 +94,24 @@ class GeminiClient {
       // Add knowledge base files first if provided
       if (options.knowledgeBaseFiles && options.knowledgeBaseFiles.length > 0) {
         let validFilesCount = 0;
+        console.log('🔍 GEMINI CLIENT: Checking', options.knowledgeBaseFiles.length, 'knowledge base files for expiration');
+
         for (const file of options.knowledgeBaseFiles) {
+          // Enhanced file expiration logging
+          if (file.geminiUri) {
+            const isExpired = this.isFileExpired(file);
+            const createTime = file.createTime ? new Date(file.createTime) : null;
+            const hoursSinceCreation = createTime ? (Date.now() - createTime.getTime()) / (1000 * 60 * 60) : 'unknown';
+
+            console.log(`🔍 File: ${file.name}`, {
+              geminiUri: file.geminiUri.substring(0, 50) + '...',
+              createTime: createTime?.toISOString(),
+              hoursSinceCreation: typeof hoursSinceCreation === 'number' ? hoursSinceCreation.toFixed(1) : hoursSinceCreation,
+              isExpired,
+              status: isExpired ? '❌ EXPIRED' : '✅ VALID'
+            });
+          }
+
           if (file.geminiUri && !this.isFileExpired(file)) {
             let finalMimeType = file.mimeType || 'text/plain';
 
@@ -249,6 +266,20 @@ class GeminiClient {
           console.error('💡 This file no longer exists or you don\'t have permission to access it');
           console.error('🔧 SOLUTION: Remove this file from your knowledge base and upload a fresh copy');
 
+          // Try to auto-refresh expired files if knowledge base manager is available
+          if (window.knowledgeBaseManager) {
+            console.log('🔄 Attempting to auto-refresh expired files...');
+            try {
+              const currentApiKey = await this.getApiKey();
+              const refreshResult = await window.knowledgeBaseManager.refreshExpiredFiles(currentApiKey);
+              if (refreshResult.refreshed > 0) {
+                throw new Error(`File access error detected. ${refreshResult.refreshed} files were automatically refreshed. Please try your request again.`);
+              }
+            } catch (refreshError) {
+              console.warn('🚨 Auto-refresh failed:', refreshError);
+            }
+          }
+
           throw new Error(`Stale file reference detected (${fileId}). Please remove this file from your knowledge base and upload a fresh copy. The file may have expired or been deleted.`);
         }
 
@@ -318,7 +349,24 @@ class GeminiClient {
       // Add knowledge base files first if provided
       if (options.knowledgeBaseFiles && options.knowledgeBaseFiles.length > 0) {
         let validFilesCount = 0;
+        console.log('🔍 GEMINI CHAT: Checking', options.knowledgeBaseFiles.length, 'knowledge base files for expiration');
+
         for (const file of options.knowledgeBaseFiles) {
+          // Enhanced file expiration logging for chat
+          if (file.geminiUri) {
+            const isExpired = this.isFileExpired(file);
+            const createTime = file.createTime ? new Date(file.createTime) : null;
+            const hoursSinceCreation = createTime ? (Date.now() - createTime.getTime()) / (1000 * 60 * 60) : 'unknown';
+
+            console.log(`🔍 Chat File: ${file.name}`, {
+              geminiUri: file.geminiUri.substring(0, 50) + '...',
+              createTime: createTime?.toISOString(),
+              hoursSinceCreation: typeof hoursSinceCreation === 'number' ? hoursSinceCreation.toFixed(1) : hoursSinceCreation,
+              isExpired,
+              status: isExpired ? '❌ EXPIRED' : '✅ VALID'
+            });
+          }
+
           if (file.geminiUri && !this.isFileExpired(file)) {
             let finalMimeType = file.mimeType || 'text/plain';
 
@@ -377,7 +425,22 @@ class GeminiClient {
             currentMessageParts.push(fileDataPart);
             validFilesCount++;
           } else if (file.geminiUri && this.isFileExpired(file)) {
-            console.warn('aiFiverr Gemini: Skipping expired file in chat:', file.name);
+            const createTime = file.createTime ? new Date(file.createTime) : null;
+            const hoursSinceCreation = createTime ? (Date.now() - createTime.getTime()) / (1000 * 60 * 60) : 'unknown';
+            console.warn('🚨 aiFiverr Gemini: Skipping expired file:', {
+              name: file.name,
+              createTime: createTime?.toISOString(),
+              hoursSinceCreation: typeof hoursSinceCreation === 'number' ? hoursSinceCreation.toFixed(1) + ' hours' : hoursSinceCreation,
+              geminiUri: file.geminiUri.substring(0, 50) + '...',
+              message: 'File expired (48-hour limit exceeded). Please refresh or re-upload.'
+            });
+          } else if (file.geminiUri) {
+            console.warn('🚨 aiFiverr Gemini: File has URI but failed other checks:', {
+              name: file.name,
+              hasGeminiUri: !!file.geminiUri,
+              hasCreateTime: !!file.createTime,
+              message: 'File may be in invalid state'
+            });
           }
         }
         console.log('aiFiverr Gemini: Added', validFilesCount, 'valid knowledge base files to chat (', options.knowledgeBaseFiles.length, 'total)');
@@ -472,6 +535,20 @@ class GeminiClient {
           console.error('🚨 STALE FILE REFERENCE DETECTED:', fileId);
           console.error('💡 This file no longer exists or you don\'t have permission to access it');
           console.error('🔧 SOLUTION: Remove this file from your knowledge base and upload a fresh copy');
+
+          // Try to auto-refresh expired files if knowledge base manager is available
+          if (window.knowledgeBaseManager) {
+            console.log('🔄 Attempting to auto-refresh expired files...');
+            try {
+              const currentApiKey = await this.getApiKey();
+              const refreshResult = await window.knowledgeBaseManager.refreshExpiredFiles(currentApiKey);
+              if (refreshResult.refreshed > 0) {
+                throw new Error(`File access error detected. ${refreshResult.refreshed} files were automatically refreshed. Please try your request again.`);
+              }
+            } catch (refreshError) {
+              console.warn('🚨 Auto-refresh failed:', refreshError);
+            }
+          }
 
           throw new Error(`Stale file reference detected (${fileId}). Please remove this file from your knowledge base and upload a fresh copy. The file may have expired or been deleted.`);
         }
