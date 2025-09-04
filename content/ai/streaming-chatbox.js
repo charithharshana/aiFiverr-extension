@@ -31,6 +31,10 @@ class StreamingChatbox {
     this.originalVariableUsage = null; // Stores which variables were used in original prompt
     this.manuallyAttachedFiles = []; // Stores manually attached files
 
+    // NEW: Grounding settings preservation
+    this.googleSearchGrounding = false; // Google Search grounding state
+    this.urlContextExtraction = false; // URL context extraction state
+
     // NEW: File access validation and error handling
     // FIXED: Remove hardcoded file blacklist since API key consistency fix resolves access issues
     // Only keep truly problematic files that are confirmed to be permanently inaccessible
@@ -1554,6 +1558,26 @@ class StreamingChatbox {
       }
     };
 
+    // Add grounding tools if enabled
+    const enableGrounding = this.googleSearchGrounding || this.urlContextExtraction;
+    if (enableGrounding) {
+      payload.tools = [];
+
+      if (this.googleSearchGrounding) {
+        payload.tools.push({ googleSearch: {} });
+        console.log('aiFiverr StreamingChatbox: Added Google Search grounding tool');
+      }
+
+      if (this.urlContextExtraction) {
+        payload.tools.push({ urlContext: {} });
+        console.log('aiFiverr StreamingChatbox: Added URL context extraction tool');
+      }
+
+      if (payload.tools.length > 0) {
+        console.log('aiFiverr StreamingChatbox: Using grounding tools:', payload.tools.map(t => Object.keys(t)[0]));
+      }
+    }
+
     // Get model name
     let model = 'gemini-2.5-flash';
     if (window.enhancedGeminiClient) {
@@ -1663,6 +1687,59 @@ class StreamingChatbox {
 
     // Fallback: Advanced brace-counting parser
     return this.parseWithBraceCounting(sanitizedStr);
+  }
+
+  /**
+   * Process grounding metadata and add citations to response text
+   */
+  processGroundingMetadata(text, groundingMetadata) {
+    try {
+      if (!groundingMetadata || !groundingMetadata.groundingSupports) {
+        return text;
+      }
+
+      const supports = groundingMetadata.groundingSupports;
+      const chunks = groundingMetadata.groundingChunks;
+
+      if (!supports || !chunks) {
+        return text;
+      }
+
+      // Sort supports by end_index in descending order to avoid shifting issues when inserting
+      const sortedSupports = [...supports].sort(
+        (a, b) => (b.segment?.endIndex ?? 0) - (a.segment?.endIndex ?? 0)
+      );
+
+      let enhancedText = text;
+
+      for (const support of sortedSupports) {
+        const endIndex = support.segment?.endIndex;
+        if (endIndex === undefined || !support.groundingChunkIndices?.length) {
+          continue;
+        }
+
+        const citationLinks = support.groundingChunkIndices
+          .map(i => {
+            const chunk = chunks[i];
+            if (chunk?.web?.uri) {
+              return `[${i + 1}](${chunk.web.uri})`;
+            }
+            return null;
+          })
+          .filter(Boolean);
+
+        if (citationLinks.length > 0) {
+          const citationString = ` ${citationLinks.join(', ')}`;
+          enhancedText = enhancedText.slice(0, endIndex) + citationString + enhancedText.slice(endIndex);
+        }
+      }
+
+      console.log('aiFiverr StreamingChatbox: Added citations to response');
+      return enhancedText;
+    } catch (error) {
+      console.error('aiFiverr StreamingChatbox: Error processing grounding metadata:', error);
+      return text; // Return original text if citation processing fails
+    }
   }
 
   /**
@@ -2122,6 +2199,7 @@ class StreamingChatbox {
     let buffer = '';
     let fullResponse = '';
     let chunkCount = 0;
+    let groundingMetadata = null; // Track grounding metadata for final processing
 
     const contentDiv = this.currentStreamingMessage.querySelector('.chatbox-message-content');
 
@@ -2178,6 +2256,12 @@ class StreamingChatbox {
                   this.scrollToBottom();
                   console.log('aiFiverr StreamingChatbox: Added text chunk:', text.substring(0, 50) + (text.length > 50 ? '...' : ''));
                 }
+
+                // Capture grounding metadata if available
+                if (chunk.candidates[0].groundingMetadata) {
+                  groundingMetadata = chunk.candidates[0].groundingMetadata;
+                  console.log('aiFiverr StreamingChatbox: Captured grounding metadata');
+                }
               }
             } else {
               // Fallback: try to parse as direct JSON (for compatibility)
@@ -2210,6 +2294,17 @@ class StreamingChatbox {
         role: 'model',
         parts: [{ text: fullResponse }]
       });
+
+      // Process grounding metadata if available
+      if (groundingMetadata) {
+        console.log('aiFiverr StreamingChatbox: Processing grounding metadata for final response');
+        const enhancedResponse = this.processGroundingMetadata(fullResponse, groundingMetadata);
+        if (enhancedResponse !== fullResponse) {
+          contentDiv.innerHTML = this.formatMessage(enhancedResponse, { editMode: false });
+          contentDiv.dataset.originalMarkdown = enhancedResponse;
+          console.log('aiFiverr StreamingChatbox: Applied grounding citations to final response');
+        }
+      }
 
       // Remove streaming class and add action buttons
       this.currentStreamingMessage.classList.remove('streaming');

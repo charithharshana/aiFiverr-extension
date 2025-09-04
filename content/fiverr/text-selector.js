@@ -3594,6 +3594,17 @@ class TextSelector {
         console.log('aiFiverr: No manually attached files to transfer');
       }
 
+      // NEW: Transfer grounding settings from floating menu to streaming chat
+      if (this.googleSearchGrounding !== undefined) {
+        this.streamingChatbox.googleSearchGrounding = this.googleSearchGrounding;
+        console.log('aiFiverr: Google Search grounding transferred:', this.googleSearchGrounding);
+      }
+
+      if (this.urlContextExtraction !== undefined) {
+        this.streamingChatbox.urlContextExtraction = this.urlContextExtraction;
+        console.log('aiFiverr: URL context extraction transferred:', this.urlContextExtraction);
+      }
+
       // NEW: Ensure API key session consistency (with fallback)
       try {
         await this.ensureAPIKeySessionConsistency();
