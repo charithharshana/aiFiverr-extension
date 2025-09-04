@@ -22,6 +22,9 @@ class KnowledgeBaseManager {
     await this.loadTemplates();
     await this.loadKnowledgeBaseFiles();
 
+    // CRITICAL FIX: Fix any files with missing timestamps after loading
+    await this.fixFilesWithMissingTimestamps();
+
     // Only initialize file lifecycle manager and sync if authenticated
     if (this.isUserAuthenticated()) {
       // Initialize comprehensive file lifecycle manager
@@ -650,7 +653,9 @@ class KnowledgeBaseManager {
 
       this.files.clear();
       Object.entries(files).forEach(([key, fileData]) => {
-        this.files.set(key, fileData);
+        // CRITICAL FIX: Normalize timestamps when loading files from storage
+        const normalizedFileData = this.normalizeFileTimestamps(fileData);
+        this.files.set(key, normalizedFileData);
       });
 
       // Only log if debugging is enabled
@@ -740,8 +745,11 @@ class KnowledgeBaseManager {
       console.warn('aiFiverr KB: Could not determine upload API key:', error);
     }
 
+    // CRITICAL FIX: Normalize timestamp fields for consistent access across system
+    const normalizedFileData = this.normalizeFileTimestamps(fileData);
+
     this.files.set(key, {
-      ...fileData,
+      ...normalizedFileData,
       addedAt: new Date().toISOString(),
       type: 'file',
       // NEW: Track which API key was used to upload this file
@@ -784,6 +792,43 @@ class KnowledgeBaseManager {
   }
 
   /**
+   * Normalize file timestamp fields for consistent access across system components
+   * CRITICAL FIX: Different parts of system use different field names for timestamps
+   */
+  normalizeFileTimestamps(fileData) {
+    const normalized = { ...fileData };
+
+    // Extract timestamp from any available field
+    const timestamp = fileData.createTime ||
+                     fileData.geminiCreateTime ||
+                     fileData.geminiUploadTime ||
+                     fileData.uploadTimestamp ||
+                     fileData.createdTime ||
+                     fileData.addedAt;
+
+    if (timestamp) {
+      // Ensure all timestamp fields are populated for cross-component compatibility
+      const timestampValue = typeof timestamp === 'number' ? timestamp : new Date(timestamp).getTime();
+      const isoString = new Date(timestampValue).toISOString();
+
+      normalized.createTime = isoString;           // For Gemini client compatibility
+      normalized.geminiCreateTime = isoString;     // For Firebase background compatibility
+      normalized.geminiUploadTime = timestampValue; // For knowledge base manager compatibility
+      normalized.uploadTimestamp = timestampValue;  // For API key rotation compatibility
+
+      console.log(`aiFiverr KB: Normalized timestamps for ${fileData.name}:`, {
+        originalTimestamp: timestamp,
+        normalizedISO: isoString,
+        normalizedTimestamp: timestampValue
+      });
+    } else {
+      console.warn(`aiFiverr KB: No timestamp found for file ${fileData.name} - file may be inaccessible`);
+    }
+
+    return normalized;
+  }
+
+  /**
    * Get the API key that should be used to access a specific file
    * @param {string} fileKey - The file key
    * @returns {string|null} - The API key to use for this file
@@ -821,14 +866,18 @@ class KnowledgeBaseManager {
     }
 
     // Update the file reference with new API key and URI
-    this.files.set(fileKey, {
+    const updatedFileData = {
       ...fileRef,
       uploadApiKey: newApiKey,
       uploadApiKeyHash: this.hashApiKey(newApiKey),
       uploadTimestamp: Date.now(),
       geminiUri: newGeminiUri,
       refreshedAt: new Date().toISOString()
-    });
+    };
+
+    // CRITICAL FIX: Normalize timestamps after API key update
+    const normalizedFileData = this.normalizeFileTimestamps(updatedFileData);
+    this.files.set(fileKey, normalizedFileData);
 
     await this.saveKnowledgeBaseFiles();
     console.log(`aiFiverr KB: Updated API key for file ${fileKey}`);
@@ -3165,5 +3214,49 @@ window.testFileManagement = {
 
     console.log('📊 Test Results:', results);
     return results;
+  }
+
+  /**
+   * Fix files with missing timestamps by normalizing existing data
+   * CRITICAL FIX: Repair files that have valid Gemini URIs but missing timestamp metadata
+   */
+  async fixFilesWithMissingTimestamps() {
+    console.log('aiFiverr KB: Checking for files with missing timestamps...');
+
+    let fixedCount = 0;
+    const now = Date.now();
+    const currentTime = new Date().toISOString();
+
+    for (const [fileKey, fileRef] of this.files) {
+      // Check if file has Gemini URI but missing all timestamp fields
+      if (fileRef.geminiUri && !fileRef.createTime && !fileRef.geminiCreateTime &&
+          !fileRef.geminiUploadTime && !fileRef.uploadTimestamp) {
+
+        console.log(`aiFiverr KB: Fixing missing timestamps for file: ${fileRef.name}`);
+
+        // Set current time as fallback (file will be treated as fresh)
+        const fixedFileData = {
+          ...fileRef,
+          createTime: currentTime,
+          geminiCreateTime: currentTime,
+          geminiUploadTime: now,
+          uploadTimestamp: now,
+          fixedTimestamp: true, // Mark as fixed for debugging
+          fixedAt: currentTime
+        };
+
+        this.files.set(fileKey, fixedFileData);
+        fixedCount++;
+      }
+    }
+
+    if (fixedCount > 0) {
+      await this.saveKnowledgeBaseFiles();
+      console.log(`aiFiverr KB: Fixed timestamps for ${fixedCount} files`);
+    } else {
+      console.log('aiFiverr KB: No files with missing timestamps found');
+    }
+
+    return { fixedCount };
   }
 };
