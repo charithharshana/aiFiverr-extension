@@ -918,6 +918,50 @@ class StreamingChatbox {
   }
 
   /**
+   * Test if a specific file is accessible via API
+   * @param {Object} file - File object to test
+   * @returns {boolean} - True if accessible, false otherwise
+   */
+  async testFileAccessibility(file) {
+    try {
+      if (!file.geminiUri) {
+        return false;
+      }
+
+      const fileId = file.geminiUri.split('/').pop();
+      const apiKey = await this.getCurrentApiKey();
+
+      if (!apiKey) {
+        console.warn('StreamingChatbox: No API key available for accessibility test');
+        return false;
+      }
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/files/${fileId}?key=${apiKey}`, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(5000)
+      });
+
+      const isAccessible = response.ok;
+      console.log(`🔍 StreamingChatbox: File accessibility test for ${file.name} (${fileId}): ${isAccessible ? 'PASS' : 'FAIL'}`);
+
+      return isAccessible;
+    } catch (error) {
+      console.warn('StreamingChatbox: File accessibility test failed:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Check if a file ID has been problematic before
+   * @param {string} fileId - File ID to check
+   * @returns {boolean} - True if file has caused issues before
+   */
+  hasFileBeenProblematic(fileId) {
+    // Check if file ID is in our suspicious list or matches known problematic patterns
+    return this.suspiciousFileIds && this.suspiciousFileIds.has(fileId);
+  }
+
+  /**
    * Set original prompt context for consistent variable usage
    * @param {Object} context - Original prompt processing context
    */
@@ -947,9 +991,12 @@ class StreamingChatbox {
 
     const validFiles = [];
 
-    // Initialize suspicious files list with only truly problematic files
+    // Initialize suspicious files list with confirmed problematic files
     if (!this.suspiciousFileIds) {
-      this.suspiciousFileIds = new Set(['wrpdb7uq3ddk']); // Only confirmed problematic files
+      this.suspiciousFileIds = new Set([
+        'wrpdb7uq3ddk',  // Original problematic file
+        '46vm361k1btt'   // portfolio.md file causing 403 permission errors
+      ]);
     }
 
     for (const file of files) {
@@ -2441,12 +2488,17 @@ class StreamingChatbox {
       if (contentDiv) {
         let errorMessage = '❌ Error: ';
 
-        // Provide more specific error messages
-        if (error.message.includes('API key')) {
+        // FIXED: Check for file access errors FIRST to prevent API key confusion
+        if (error.message.includes('File access error:') || error.message.includes('no longer accessible')) {
+          // File permission errors should display as-is with proper context
+          errorMessage += error.message.replace('File access error: ', '');
+        } else if (error.message.includes('No API key available') || error.message.includes('Failed to retrieve API key')) {
+          // Only show API key configuration error for actual API key issues
           errorMessage += 'API key not configured. Please set up your Gemini API key in the extension settings.';
         } else if (error.message.includes('401')) {
           errorMessage += 'Invalid API key. Please check your Gemini API key in the extension settings.';
-        } else if (error.message.includes('403')) {
+        } else if (error.message.includes('403') && !error.message.includes('File access error')) {
+          // Only show generic 403 message if it's NOT a file permission error
           errorMessage += 'API access forbidden. Please check your API key permissions.';
         } else if (error.message.includes('429')) {
           errorMessage += 'Rate limit exceeded. Please wait a moment and try again.';
