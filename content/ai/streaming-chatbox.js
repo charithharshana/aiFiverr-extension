@@ -24,6 +24,11 @@ class StreamingChatbox {
     this.messagesContainer = null;
     this.inputElement = null;
     this.sendButton = null;
+    this.promptInputElement = null; // NEW: Prompt input textarea
+    this.searchToggleButton = null; // NEW: Google Search grounding toggle
+    this.urlToggleButton = null; // NEW: URL context extraction toggle
+    this.newSessionButton = null; // NEW: New session button
+    this.replyText = ''; // NEW: Store text for {reply} variable
     this.dragState = { isDragging: false, startX: 0, startY: 0, startLeft: 0, startTop: 0 };
 
     // NEW: Context preservation for variable processor consistency
@@ -98,6 +103,10 @@ class StreamingChatbox {
     this.messagesContainer = this.chatboxElement.querySelector('.chatbox-messages');
     this.inputElement = this.chatboxElement.querySelector('.chatbox-input');
     this.sendButton = this.chatboxElement.querySelector('.chatbox-send-btn');
+    this.promptInputElement = this.chatboxElement.querySelector('.chatbox-prompt-input');
+    this.searchToggleButton = this.chatboxElement.querySelector('.chatbox-grounding-toggle[data-type="search"]');
+    this.urlToggleButton = this.chatboxElement.querySelector('.chatbox-grounding-toggle[data-type="url"]');
+    this.newSessionButton = this.chatboxElement.querySelector('.chatbox-new-session-btn');
 
     // Append to body
     document.body.appendChild(this.chatboxElement);
@@ -121,10 +130,27 @@ class StreamingChatbox {
       </div>
       <div class="chatbox-content">
         <div class="chatbox-messages"></div>
+        <div class="chatbox-prompt-area">
+          <div class="chatbox-prompt-header">
+            <div class="chatbox-prompt-left">
+              <span class="chatbox-prompt-label">Input Text (available as {reply} variable):</span>
+            </div>
+            <div class="chatbox-prompt-right">
+              <button class="chatbox-grounding-toggle" data-type="search" title="Google Search grounding">🔍</button>
+              <button class="chatbox-grounding-toggle" data-type="url" title="URL context extraction">🔗</button>
+              <button class="chatbox-new-session-btn" title="New Session - Clear both {conversation} and {reply} variables">🔄</button>
+            </div>
+          </div>
+          <textarea
+            class="chatbox-prompt-input"
+            placeholder="Type your input text here (will be available as {reply} variable in prompts)"
+            rows="2"
+          ></textarea>
+        </div>
         <div class="chatbox-input-area">
           <div class="chatbox-input-wrapper">
-            <textarea 
-              class="chatbox-input" 
+            <textarea
+              class="chatbox-input"
               placeholder="Continue the conversation..."
               rows="1"
             ></textarea>
@@ -419,6 +445,100 @@ class StreamingChatbox {
         flex-grow: 1;
       }
 
+      .chatbox-prompt-area {
+        padding: 8px 12px;
+        border-top: 1px solid #e0e0e0;
+        background: #f8f9fa;
+      }
+
+      .chatbox-prompt-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+
+      .chatbox-prompt-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .chatbox-prompt-label {
+        font-size: 11px;
+        color: #666;
+        font-weight: 500;
+      }
+
+      .chatbox-prompt-right {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .chatbox-grounding-toggle {
+        width: 24px;
+        height: 24px;
+        border: 1px solid #ddd;
+        background: white;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        transition: all 0.2s ease;
+      }
+
+      .chatbox-grounding-toggle:hover {
+        background: #f0f0f0;
+        border-color: #bbb;
+      }
+
+      .chatbox-grounding-toggle.active {
+        background: #3b82f6;
+        border-color: #3b82f6;
+        color: white;
+      }
+
+      .chatbox-new-session-btn {
+        width: 24px;
+        height: 24px;
+        border: 1px solid #ddd;
+        background: white;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        transition: all 0.2s ease;
+      }
+
+      .chatbox-new-session-btn:hover {
+        background: #f0f0f0;
+        border-color: #bbb;
+      }
+
+      .chatbox-prompt-input {
+        width: 100%;
+        min-height: 40px;
+        max-height: 120px;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 13px;
+        resize: vertical;
+        box-sizing: border-box;
+        font-family: inherit;
+      }
+
+      .chatbox-prompt-input:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+      }
+
       .chatbox-input-area {
         padding: 8px 12px;
         border-top: 1px solid #e0e0e0;
@@ -608,6 +728,31 @@ class StreamingChatbox {
       this.autoResizeInput();
     });
 
+    // NEW: Prompt input field
+    this.promptInputElement.addEventListener('input', (e) => {
+      this.replyText = e.target.value;
+      this.autoResizePromptInput();
+    });
+
+    // NEW: Google Search grounding toggle
+    this.searchToggleButton.addEventListener('click', () => {
+      this.googleSearchGrounding = !this.googleSearchGrounding;
+      this.searchToggleButton.classList.toggle('active', this.googleSearchGrounding);
+      console.log('aiFiverr StreamingChatbox: Google Search grounding toggled:', this.googleSearchGrounding);
+    });
+
+    // NEW: URL context extraction toggle
+    this.urlToggleButton.addEventListener('click', () => {
+      this.urlContextExtraction = !this.urlContextExtraction;
+      this.urlToggleButton.classList.toggle('active', this.urlContextExtraction);
+      console.log('aiFiverr StreamingChatbox: URL context extraction toggled:', this.urlContextExtraction);
+    });
+
+    // NEW: New session button
+    this.newSessionButton.addEventListener('click', () => {
+      this.startNewSession();
+    });
+
     // Dragging functionality
     if (this.options.enableDragging) {
       this.setupDragging();
@@ -692,11 +837,46 @@ class StreamingChatbox {
   }
 
   /**
+   * Auto-resize prompt input field
+   */
+  autoResizePromptInput() {
+    this.promptInputElement.style.height = 'auto';
+    this.promptInputElement.style.height = Math.min(this.promptInputElement.scrollHeight, 120) + 'px';
+  }
+
+  /**
+   * Start a new session - clear both {conversation} and {reply} variables
+   */
+  startNewSession() {
+    console.log('aiFiverr StreamingChatbox: Starting new session - clearing both {conversation} and {reply} variables');
+
+    // Clear reply text
+    this.replyText = '';
+    if (this.promptInputElement) {
+      this.promptInputElement.value = '';
+      this.autoResizePromptInput();
+    }
+
+    // Clear conversation history
+    this.conversationHistory = [];
+    this.clearMessages();
+
+    // Clear original context
+    this.originalPromptContext = null;
+    this.originalVariableUsage = null;
+
+    console.log('aiFiverr StreamingChatbox: New session started - all variables cleared');
+  }
+
+  /**
    * Show the chatbox
    */
   show(initialMessage = null) {
     this.isVisible = true;
     this.chatboxElement.style.display = 'flex';
+
+    // Initialize grounding controls with current settings
+    this.initializeGroundingControls();
 
     if (initialMessage) {
       this.addMessage('assistant', initialMessage);
@@ -706,6 +886,50 @@ class StreamingChatbox {
     setTimeout(() => {
       this.inputElement.focus();
     }, 100);
+  }
+
+  /**
+   * Initialize grounding controls with current settings
+   */
+  async initializeGroundingControls() {
+    try {
+      // Get current settings
+      const settings = await this.getSettings();
+
+      // Initialize grounding states if not already set
+      if (this.googleSearchGrounding === undefined) {
+        this.googleSearchGrounding = settings.googleSearchGrounding || false;
+      }
+      if (this.urlContextExtraction === undefined) {
+        this.urlContextExtraction = settings.urlContextExtraction || false;
+      }
+
+      // Update button states
+      this.searchToggleButton.classList.toggle('active', this.googleSearchGrounding);
+      this.urlToggleButton.classList.toggle('active', this.urlContextExtraction);
+
+      console.log('aiFiverr StreamingChatbox: Grounding controls initialized:', {
+        googleSearchGrounding: this.googleSearchGrounding,
+        urlContextExtraction: this.urlContextExtraction
+      });
+    } catch (error) {
+      console.error('aiFiverr StreamingChatbox: Error initializing grounding controls:', error);
+    }
+  }
+
+  /**
+   * Get settings from storage
+   */
+  async getSettings() {
+    try {
+      if (window.storageManager) {
+        return await window.storageManager.getSettings();
+      }
+      return {};
+    } catch (error) {
+      console.error('aiFiverr StreamingChatbox: Error getting settings:', error);
+      return {};
+    }
   }
 
   /**
@@ -1150,10 +1374,9 @@ class StreamingChatbox {
             break;
 
           case 'reply':
-            // Include reply context only if it was originally used
-            if (this.originalPromptContext && this.originalPromptContext.reply) {
-              context.reply = this.originalPromptContext.reply;
-            }
+            // UPDATED: Use current reply text from prompt input, fallback to original context
+            context.reply = this.replyText || (this.originalPromptContext && this.originalPromptContext.reply) || '';
+            console.log('aiFiverr StreamingChatbox: Using reply text:', context.reply);
             break;
 
           case 'username':
